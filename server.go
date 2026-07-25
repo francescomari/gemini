@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -267,6 +268,11 @@ func (s *Server) handle(conn net.Conn) {
 		} else {
 			writeHeader(conn, StatusTemporaryFailure, "Unable to read")
 		}
+		return
+	}
+
+	if !bytes.HasSuffix(data, []byte{'\r', '\n'}) {
+		writeHeader(conn, StatusBadRequest, "Request is malformed")
 		return
 	}
 

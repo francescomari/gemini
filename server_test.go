@@ -35,6 +35,12 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "59 Request is too long\r\n")
 	})
 
+	t.Run("request malformed", func(t *testing.T) {
+		addr := startServer(t, cert, nil)
+		res := send(t, addr, "gemini://example.com/\n")
+		assertResponse(t, res, "59 Request is malformed\r\n")
+	})
+
 	t.Run("request too short", func(t *testing.T) {
 		addr := startServer(t, cert, nil)
 		res := send(t, addr, "\r\n")
