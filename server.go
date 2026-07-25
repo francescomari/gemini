@@ -143,7 +143,6 @@ type Server struct {
 
 	mu       sync.Mutex
 	listener net.Listener
-	wg       sync.WaitGroup
 }
 
 // ListenAndServe starts a TLS connection over TCP, and serves Gemini clients
