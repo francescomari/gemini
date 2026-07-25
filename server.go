@@ -103,6 +103,10 @@ type ResponseWriter interface {
 // If a handler doesn't write a response header or response data, the server
 // automatically sends a StatusSuccess response with media type "text/gemini"
 // and no content.
+//
+// While a handler should deal with their own panics, the server intercepts
+// and swallows a panic thrown by a handler. Unless a response has already
+// been sent to the client, panics result in StatusCGIError responses.
 type Handler interface {
 	Handle(r *Request, w ResponseWriter)
 }
@@ -348,11 +352,17 @@ func (s *Server) handle(conn net.Conn) {
 		w: conn,
 	}
 
-	s.Handler.Handle(&request, &responseWriter)
+	func() {
+		defer func() {
+			if v := recover(); v != nil {
+				responseWriter.WriteHeader(StatusCGIError, "Panic detected")
+			}
+		}()
 
-	if !responseWriter.header {
-		responseWriter.writeDefaultHeader()
-	}
+		s.Handler.Handle(&request, &responseWriter)
+	}()
+
+	responseWriter.writeDefaultHeader()
 }
 
 type responseWriter struct {

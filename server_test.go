@@ -248,6 +248,14 @@ func TestServer(t *testing.T) {
 		}))
 		send(t, addr, "gemini://example.com/\r\n")
 	})
+
+	t.Run("panic handling", func(t *testing.T) {
+		addr := startServer(t, cert, gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+			panic("something went wrong")
+		}))
+		res := send(t, addr, "gemini://example.com/\r\n")
+		assertResponse(t, res, "42 Panic detected\r\n")
+	})
 }
 
 func generateCertificate(t *testing.T, template *x509.Certificate) tls.Certificate {
