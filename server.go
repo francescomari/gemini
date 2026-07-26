@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const DefaultPort = 1965
@@ -306,9 +307,18 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	if parsed.Path != "" && !strings.HasPrefix(parsed.Path, "/") {
+	path := cleanPath(parsed.Path)
+
+	if !strings.HasPrefix(path, "/") {
 		writeHeader(rwc, StatusBadRequest, "The URL path is relative")
 		return
+	}
+
+	for _, c := range path {
+		if unicode.Is(unicode.C, c) {
+			writeHeader(rwc, StatusBadRequest, "The URL path contains control characters")
+			return
+		}
 	}
 
 	if parsed.User != nil {
@@ -349,7 +359,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		Scheme: parsed.Scheme,
 		Host:   parsed.Hostname(),
 		Port:   port,
-		Path:   cleanPath(parsed.Path),
+		Path:   path,
 		Query:  parsed.RawQuery,
 		Cert:   cert,
 	}
@@ -430,6 +440,8 @@ func (rw *responseWriter) validateMeta(statusCode StatusCode, meta string) {
 			panic("sending a permanent redirection without a URI")
 		}
 	} else {
+		rw.validateControlCharacters(meta)
+
 		switch statusCode {
 		case StatusSuccess:
 			rw.validateMediaType(meta)
@@ -441,6 +453,14 @@ func (rw *responseWriter) validateMeta(statusCode StatusCode, meta string) {
 	}
 }
 
+func (rw *responseWriter) validateControlCharacters(s string) {
+	for _, c := range s {
+		if unicode.Is(unicode.C, c) {
+			panic("meta contains control characters")
+		}
+	}
+}
+
 func (rw *responseWriter) validateMediaType(s string) {
 	if _, _, err := mime.ParseMediaType(s); err != nil {
 		panic("invalid media type")
@@ -448,10 +468,8 @@ func (rw *responseWriter) validateMediaType(s string) {
 }
 
 func (rw *responseWriter) validateURL(s string) {
-	if u, err := url.Parse(s); err != nil {
+	if _, err := url.Parse(s); err != nil {
 		panic("invalid URL")
-	} else if !strings.HasPrefix(u.Path, "/") {
-		panic("invalid URL path")
 	}
 }
 

@@ -61,6 +61,12 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "59 The URL path is relative\r\n")
 	})
 
+	t.Run("path with control characters", func(t *testing.T) {
+		addr := startServer(t, cert, nil)
+		res := send(t, addr, "gemini://example.com/x%0Ax\r\n")
+		assertResponse(t, res, "59 The URL path contains control characters\r\n")
+	})
+
 	t.Run("user info", func(t *testing.T) {
 		addr := startServer(t, cert, nil)
 		res := send(t, addr, "gemini://user@example.com/path\r\n")
@@ -183,6 +189,14 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "62 Invalid signature\r\n")
 	})
 
+	t.Run("meta with control characters", func(t *testing.T) {
+		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+			defer assertPanics(t, "meta contains control characters")
+			w.WriteHeader(gemini.StatusTemporaryFailure, "x\nx")
+		}))
+		send(t, addr, "gemini://example.com/\r\n")
+	})
+
 	t.Run("input expected requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			defer assertPanics(t, "sending an input without a prompt")
@@ -243,14 +257,6 @@ func TestServer(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			defer assertPanics(t, "invalid URL")
 			w.WriteHeader(gemini.StatusPermanentRedirection, ":")
-		}))
-		send(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("permanent redirect requires valid url", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid URL path")
-			w.WriteHeader(gemini.StatusPermanentRedirection, "relative")
 		}))
 		send(t, addr, "gemini://example.com/\r\n")
 	})
