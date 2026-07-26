@@ -158,11 +158,12 @@ type Server struct {
 }
 
 // ListenAndServe starts a TLS connection over TCP and serves Gemini clients
-// connecting to this server. ListenAndServer blocks until the context is
-// cancelled. When the context is cancelled, ListenAndServe closes the
-// underlying listener, waits until every in-flight request is processed, and
-// returns an error wrapping the context cancellation error. ListenAndServe
-// always returns an error.
+// connecting to this server. ListenAndServe blocks until the context is
+// cancelled or accepting a connection fails. In both cases, ListenAndServe
+// closes the underlying listener, waits until every in-flight request is
+// processed, and returns a non-nil error wrapping the cause. Callers can use
+// errors.Is(err, context.Canceled) to distinguish a deliberate shutdown from
+// an accept failure. ListenAndServe always returns an error.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err := s.listen(); err != nil {
 		return fmt.Errorf("listen: %v", err)
