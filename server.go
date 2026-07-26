@@ -278,59 +278,65 @@ func (s *Server) accept(ctx context.Context, listener net.Listener) (net.Conn, e
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	rwc := timeoutReadWriteCloser{
-		timeout:      s.Timeout,
-		readTimeout:  s.ReadTimeout,
-		writeTimeout: s.WriteTimeout,
-		rwc:          conn,
-	}
-
 	defer func() {
-		_ = rwc.Close()
+		_ = conn.Close()
 	}()
 
-	data, err := bufio.NewReader(io.LimitReader(rwc, 1024+1+1)).ReadBytes('\n')
+	if s.ReadTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(s.ReadTimeout))
+	} else if s.Timeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(s.Timeout))
+	}
+
+	data, err := bufio.NewReader(io.LimitReader(conn, 1024+1+1)).ReadBytes('\n')
+
+	if s.WriteTimeout > 0 {
+		conn.SetWriteDeadline(time.Now().Add(s.WriteTimeout))
+	} else if s.Timeout > 0 {
+		conn.SetWriteDeadline(time.Now().Add(s.Timeout))
+	}
+
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			writeHeader(rwc, StatusBadRequest, "Request is too long")
+			writeHeader(conn, StatusBadRequest, "Request is too long")
 		} else {
-			writeHeader(rwc, StatusTemporaryFailure, "Unable to read")
+			writeHeader(conn, StatusTemporaryFailure, "Unable to read")
 		}
 		return
 	}
 
 	if !bytes.HasSuffix(data, []byte{'\r', '\n'}) {
-		writeHeader(rwc, StatusBadRequest, "Request is malformed")
+		writeHeader(conn, StatusBadRequest, "Request is malformed")
 		return
 	}
 
 	if len(data) < 3 {
-		writeHeader(rwc, StatusBadRequest, "Request is too short")
+		writeHeader(conn, StatusBadRequest, "Request is too short")
 		return
 	}
 
 	parsed, err := url.Parse(string(data[0 : len(data)-2]))
 	if err != nil {
-		writeHeader(rwc, StatusBadRequest, "The URL is malformed")
+		writeHeader(conn, StatusBadRequest, "The URL is malformed")
 		return
 	}
 
 	path := cleanPath(parsed.Path)
 
 	if !strings.HasPrefix(path, "/") {
-		writeHeader(rwc, StatusBadRequest, "The URL path is relative")
+		writeHeader(conn, StatusBadRequest, "The URL path is relative")
 		return
 	}
 
 	for _, c := range path {
 		if unicode.Is(unicode.C, c) {
-			writeHeader(rwc, StatusBadRequest, "The URL path contains control characters")
+			writeHeader(conn, StatusBadRequest, "The URL path contains control characters")
 			return
 		}
 	}
 
 	if parsed.User != nil {
-		writeHeader(rwc, StatusBadRequest, "The URL has user info")
+		writeHeader(conn, StatusBadRequest, "The URL has user info")
 		return
 	}
 
@@ -341,23 +347,23 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 
 	if cert != nil {
 		if time.Now().Before(cert.NotBefore) {
-			writeHeader(rwc, StatusCertificateNotValid, "Certificate not yet valid")
+			writeHeader(conn, StatusCertificateNotValid, "Certificate not yet valid")
 			return
 		}
 
 		if cert.NotAfter.Before(time.Now()) {
-			writeHeader(rwc, StatusCertificateNotValid, "Certificate expired")
+			writeHeader(conn, StatusCertificateNotValid, "Certificate expired")
 			return
 		}
 
 		if err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
-			writeHeader(rwc, StatusCertificateNotValid, "Invalid signature")
+			writeHeader(conn, StatusCertificateNotValid, "Invalid signature")
 			return
 		}
 	}
 
 	if s.Handler == nil {
-		writeHeader(rwc, StatusNotFound, "")
+		writeHeader(conn, StatusNotFound, "")
 		return
 	}
 
@@ -373,7 +379,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	}
 
 	responseWriter := responseWriter{
-		w: rwc,
+		w: conn,
 	}
 
 	s.callHandler(ctx, &request, &responseWriter)
