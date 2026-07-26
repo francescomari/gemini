@@ -269,25 +269,16 @@ func (s *Server) accept(ctx context.Context, listener net.Listener) (net.Conn, e
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
-	var rwc io.ReadWriteCloser
-
-	rwc = timeoutReadWriteCloser{
+	rwc := timeoutReadWriteCloser{
 		timeout:      s.Timeout,
 		readTimeout:  s.ReadTimeout,
 		writeTimeout: s.WriteTimeout,
 		rwc:          conn,
 	}
 
-	rwc = contextAwareReadWriteCloser{
-		ctx: ctx,
-		rwc: rwc,
-	}
-
 	defer func() {
 		_ = rwc.Close()
 	}()
-
-	now := time.Now()
 
 	data, err := bufio.NewReader(io.LimitReader(rwc, 1024+1+1)).ReadBytes('\n')
 	if err != nil {
@@ -325,18 +316,18 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	cert, err := s.readCertificate(ctx, conn)
+	cert, err := s.readCertificate(conn)
 	if err != nil {
 		return
 	}
 
 	if cert != nil {
-		if now.Before(cert.NotBefore) {
+		if time.Now().Before(cert.NotBefore) {
 			writeHeader(rwc, StatusCerttificateNotValid, "Certificate not yet valid")
 			return
 		}
 
-		if cert.NotAfter.Before(now) {
+		if cert.NotAfter.Before(time.Now()) {
 			writeHeader(rwc, StatusCerttificateNotValid, "Certificate expired")
 			return
 		}
@@ -382,13 +373,13 @@ func (s *Server) callHandler(ctx context.Context, r *Request, w ResponseWriter) 
 	s.Handler.Handle(ctx, r, w)
 }
 
-func (s *Server) readCertificate(ctx context.Context, conn net.Conn) (*x509.Certificate, error) {
+func (s *Server) readCertificate(conn net.Conn) (*x509.Certificate, error) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
 		return nil, fmt.Errorf("not a TLS connection")
 	}
 
-	if err := s.handshake(ctx, tlsConn); err != nil {
+	if err := tlsConn.Handshake(); err != nil {
 		return nil, fmt.Errorf("handshake: %v", err)
 	}
 
@@ -397,21 +388,6 @@ func (s *Server) readCertificate(ctx context.Context, conn net.Conn) (*x509.Cert
 	}
 
 	return nil, nil
-}
-
-func (s *Server) handshake(ctx context.Context, conn *tls.Conn) error {
-	ch := make(chan error, 1)
-
-	go func() {
-		ch <- conn.Handshake()
-	}()
-
-	select {
-	case err := <-ch:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 type responseWriter struct {

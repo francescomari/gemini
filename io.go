@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"context"
 	"io"
 	"time"
 )
@@ -78,66 +77,4 @@ func (rwc timeoutReadWriteCloser) Close() error {
 	}
 
 	return rwc.rwc.Close()
-}
-
-type contextAwareReadWriteCloser struct {
-	ctx context.Context
-	rwc io.ReadWriteCloser
-}
-
-func (rwc contextAwareReadWriteCloser) Read(p []byte) (int, error) {
-	type result struct {
-		n   int
-		err error
-	}
-
-	ch := make(chan result, 1)
-
-	go func() {
-		n, err := rwc.rwc.Read(p)
-		ch <- result{n, err}
-	}()
-
-	select {
-	case result := <-ch:
-		return result.n, result.err
-	case <-rwc.ctx.Done():
-		return 0, rwc.ctx.Err()
-	}
-}
-
-func (rwc contextAwareReadWriteCloser) Write(p []byte) (int, error) {
-	type result struct {
-		n   int
-		err error
-	}
-
-	ch := make(chan result, 1)
-
-	go func() {
-		n, err := rwc.rwc.Write(p)
-		ch <- result{n, err}
-	}()
-
-	select {
-	case result := <-ch:
-		return result.n, result.err
-	case <-rwc.ctx.Done():
-		return 0, rwc.ctx.Err()
-	}
-}
-
-func (rwc contextAwareReadWriteCloser) Close() error {
-	ch := make(chan error, 1)
-
-	go func() {
-		ch <- rwc.rwc.Close()
-	}()
-
-	select {
-	case err := <-ch:
-		return err
-	case <-rwc.ctx.Done():
-		return rwc.ctx.Err()
-	}
 }
