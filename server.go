@@ -20,6 +20,7 @@ import (
 	"unicode"
 )
 
+// DefaultPort is the default port used by the Gemini protocol.
 const DefaultPort = 1965
 
 // StatusCode is one of the available status codes.
@@ -69,25 +70,21 @@ var definedStatusCodes = map[StatusCode]bool{
 
 // Request contains the URL requested by the client.
 type Request struct {
-	// The URL scheme. It can be the empty string if the request did not
-	// contain a scheme, for example when the client requested an aboslute
-	// path.
+	// The URL scheme. It's always "gemini".
 	Scheme string
-	// The URL host. It can be the empty string if the request did not contain
-	// a scheme, for example when the client requested an absolute path.
+	// The URL host. It's never empty.
 	Host string
-	// The URL port. It can be zero if the request did not contain a port, for
-	// example when the user requested an aboslute path or when the user
-	// expectes to use the default port for the requested scheme.
+	// The URL port. It can be zero if the request didn't specify a port, in
+	// which case the client expects the default port for the gemini scheme
+	// to be used.
 	Port int
-	// The URL path. It's never empty. If the user didn't include a path in
-	// the request, Path is /.
+	// The URL path. It's never empty. If the client didn't include a path in
+	// the request, or if the path normalizes to nothing, Path is /.
 	//
-	// Paths are normalized by removing single-dot path components and
-	// processing double-dots path components. If, after normalization, the
-	// path is too short, Path is /.
+	// Paths are normalized by removing single-dot components and resolving
+	// double-dot components.
 	//
-	// Any trailing / from the URL path is presrved.
+	// A trailing / in the original URL path is preserved.
 	Path string
 	// The query component of the URL. It can be the empty string if not
 	// provided.
@@ -95,7 +92,7 @@ type Request struct {
 	// The client certificate. It can be nil if the client did not provide a
 	// certificate.
 	//
-	// If the client provides a certificate, the client always validates the
+	// If the client provides a certificate, the server always validates the
 	// not-before, not-after, and signature of the provided certificate.
 	// Self-signed certificates are expected and encouraged.
 	Cert *x509.Certificate
@@ -116,8 +113,8 @@ type ResponseWriter interface {
 	// response data is written, has no effect.
 	//
 	// WriteHeader panics if trying to generate a header that does not conform
-	// to the specification. For example, StatusSuccess always require a URL,
-	// and StatusInputExpected a prompt.
+	// to the specification. For example, StatusSuccess always requires a
+	// media type, and StatusInputExpected a prompt.
 	WriteHeader(statusCode StatusCode, meta string)
 }
 
@@ -131,7 +128,7 @@ type ResponseWriter interface {
 // [Server.ListenAndServe]. The context passed to the handler will always be
 // cancelled during the shutdown of a server.
 //
-// While a handler should deal with their own panics, the server intercepts
+// While a handler should deal with its own panics, the server intercepts
 // and swallows a panic thrown by a handler. Unless a response has already
 // been sent to the client, panics result in StatusCGIError responses.
 type Handler interface {
@@ -149,11 +146,11 @@ func (f HandlerFunc) Handle(ctx context.Context, r *Request, w ResponseWriter) {
 // Server is a Gemini server. A Server can be safely used by multiple
 // goroutines.
 type Server struct {
-	// The host this server will listen at. If not provided, the server
+	// The host this server will listen on. If not provided, the server
 	// listens on all available interfaces on the system.
 	Host string
-	// The port this server will listen at. If not provided, the server listes
-	// on a randomly allocated port.
+	// The port this server will listen on. If not provided, the server
+	// listens on a randomly allocated port.
 	Port int
 	// The server certificate. Self-signed certificates are supported and
 	// encouraged. This field is mandatory.
@@ -162,15 +159,15 @@ type Server struct {
 	// server responds with StatusNotFound to every request that would
 	// otherwise be processed by the handler.
 	Handler Handler
-	// Timeout sets the timeout for each read and write operations performed
-	// by a single request. If not specified, no timeout is set.
+	// Timeout sets the timeout for each read and write operation performed by
+	// a single request. If not specified, no timeout is set.
 	Timeout time.Duration
 	// ReadTimeout sets the timeout for read operations performed by a single
 	// request. If not specified, no read timeout is set. If both Timeout and
 	// ReadTimeout are specified, ReadTimeout overrides Timeout.
 	ReadTimeout time.Duration
 	// WriteTimeout sets the timeout for write operations performed by a
-	// single request. If not specified, no read timeout is set. If both
+	// single request. If not specified, no write timeout is set. If both
 	// Timeout and WriteTimeout are specified, WriteTimeout overrides Timeout.
 	WriteTimeout time.Duration
 
@@ -178,7 +175,7 @@ type Server struct {
 	listener net.Listener
 }
 
-// ListenAndServe starts a TLS connection over TCP and serves Gemini clients
+// ListenAndServe starts a TLS listener over TCP and serves Gemini clients
 // connecting to this server. ListenAndServe blocks until the context is
 // cancelled or accepting a connection fails. In both cases, ListenAndServe
 // closes the underlying listener, waits until every in-flight request is
