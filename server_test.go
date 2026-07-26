@@ -223,6 +223,14 @@ func TestServer(t *testing.T) {
 		send(t, addr, "gemini://example.com/\r\n")
 	})
 
+	t.Run("status code in range but undefined", func(t *testing.T) {
+		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+			defer assertPanics(t, "invalid status code")
+			w.WriteHeader(21, "")
+		}))
+		send(t, addr, "gemini://example.com/\r\n")
+	})
+
 	t.Run("meta with control characters", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			defer assertPanics(t, "meta contains control characters")

@@ -46,10 +46,26 @@ const (
 	StatusCertificateNotValid      StatusCode = 62
 )
 
-const (
-	minStatusCode = 10
-	maxStatusCode = 69
-)
+var definedStatusCodes = map[StatusCode]bool{
+	StatusInputExpected:            true,
+	StatusSensitiveInput:           true,
+	StatusSuccess:                  true,
+	StatusTemporaryRedirection:     true,
+	StatusPermanentRedirection:     true,
+	StatusTemporaryFailure:         true,
+	StatusServerUnavailable:        true,
+	StatusCGIError:                 true,
+	StatusProxyError:               true,
+	StatusSlowDown:                 true,
+	StatusPermanentFailure:         true,
+	StatusNotFound:                 true,
+	StatusGone:                     true,
+	StatusProxyRequestRefused:      true,
+	StatusBadRequest:               true,
+	StatusCertificateRequired:      true,
+	StatusCertificateNotAuthorized: true,
+	StatusCertificateNotValid:      true,
+}
 
 // Request contains the URL requested by the client.
 type Request struct {
@@ -462,7 +478,7 @@ func (rw *responseWriter) writeDefaultHeader() {
 }
 
 func (rw *responseWriter) validateMeta(statusCode StatusCode, meta string) {
-	if statusCode < minStatusCode || maxStatusCode < statusCode {
+	if !definedStatusCodes[statusCode] {
 		panic("invalid status code")
 	}
 
