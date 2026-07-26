@@ -43,7 +43,7 @@ const (
 	StatusBadRequest               StatusCode = 59
 	StatusCertificateRequired      StatusCode = 60
 	StatusCertificateNotAuthorized StatusCode = 61
-	StatusCerttificateNotValid     StatusCode = 62
+	StatusCertificateNotValid      StatusCode = 62
 )
 
 // Request contains the URL requested by the client.
@@ -333,17 +333,17 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 
 	if cert != nil {
 		if time.Now().Before(cert.NotBefore) {
-			writeHeader(rwc, StatusCerttificateNotValid, "Certificate not yet valid")
+			writeHeader(rwc, StatusCertificateNotValid, "Certificate not yet valid")
 			return
 		}
 
 		if cert.NotAfter.Before(time.Now()) {
-			writeHeader(rwc, StatusCerttificateNotValid, "Certificate expired")
+			writeHeader(rwc, StatusCertificateNotValid, "Certificate expired")
 			return
 		}
 
 		if err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
-			writeHeader(rwc, StatusCerttificateNotValid, "Invalid signature")
+			writeHeader(rwc, StatusCertificateNotValid, "Invalid signature")
 			return
 		}
 	}
