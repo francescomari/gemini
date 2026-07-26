@@ -255,11 +255,18 @@ func (s *Server) accept(ctx context.Context, listener net.Listener) (net.Conn, e
 		err  error
 	}
 
-	ch := make(chan result, 1)
+	ch := make(chan result)
 
 	go func() {
 		conn, err := listener.Accept()
-		ch <- result{conn, err}
+
+		select {
+		case ch <- result{conn, err}:
+		case <-ctx.Done():
+			if err == nil {
+				_ = conn.Close()
+			}
+		}
 	}()
 
 	select {
