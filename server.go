@@ -340,6 +340,11 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	if parsed.Fragment != "" {
+		writeHeader(conn, StatusBadRequest, "The URL has a fragment")
+		return
+	}
+
 	cert, err := s.readCertificate(conn)
 	if err != nil {
 		return

@@ -73,6 +73,12 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "59 The URL has user info\r\n")
 	})
 
+	t.Run("fragment", func(t *testing.T) {
+		addr := startServer(t, cert, nil)
+		res := send(t, addr, "gemini://example.com/path#fragment\r\n")
+		assertResponse(t, res, "59 The URL has a fragment\r\n")
+	})
+
 	t.Run("handler", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			if ctx == nil {
