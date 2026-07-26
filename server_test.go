@@ -195,6 +195,22 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "62 Invalid signature\r\n")
 	})
 
+	t.Run("status code too low", func(t *testing.T) {
+		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+			defer assertPanics(t, "invalid status code")
+			w.WriteHeader(9, "")
+		}))
+		send(t, addr, "gemini://example.com/\r\n")
+	})
+
+	t.Run("status code too high", func(t *testing.T) {
+		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+			defer assertPanics(t, "invalid status code")
+			w.WriteHeader(70, "")
+		}))
+		send(t, addr, "gemini://example.com/\r\n")
+	})
+
 	t.Run("meta with control characters", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			defer assertPanics(t, "meta contains control characters")

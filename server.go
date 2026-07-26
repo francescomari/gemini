@@ -46,6 +46,11 @@ const (
 	StatusCertificateNotValid      StatusCode = 62
 )
 
+const (
+	minStatusCode = 10
+	maxStatusCode = 69
+)
+
 // Request contains the URL requested by the client.
 type Request struct {
 	// The URL scheme. It can be the empty string if the request did not
@@ -445,6 +450,10 @@ func (rw *responseWriter) writeDefaultHeader() {
 }
 
 func (rw *responseWriter) validateMeta(statusCode StatusCode, meta string) {
+	if statusCode < minStatusCode || maxStatusCode < statusCode {
+		panic("invalid status code")
+	}
+
 	if meta == "" {
 		switch statusCode {
 		case StatusInputExpected:
