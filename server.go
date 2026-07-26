@@ -326,12 +326,24 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	path := cleanPath(parsed.Path)
-
-	if !strings.HasPrefix(path, "/") {
-		writeHeader(conn, StatusBadRequest, "The URL path is relative")
+	if parsed.Scheme == "" {
+		writeHeader(conn, StatusBadRequest, "The URL has no scheme")
 		return
 	}
+
+	if parsed.Scheme != "gemini" {
+		writeHeader(conn, StatusProxyRequestRefused, "Unsupported protocol")
+		return
+	}
+
+	host := parsed.Hostname()
+
+	if host == "" {
+		writeHeader(conn, StatusBadRequest, "The URL has no host")
+		return
+	}
+
+	path := cleanPath(parsed.Path)
 
 	for _, c := range path {
 		if unicode.Is(unicode.C, c) {
@@ -381,7 +393,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 
 	request := Request{
 		Scheme: parsed.Scheme,
-		Host:   parsed.Hostname(),
+		Host:   host,
 		Port:   port,
 		Path:   path,
 		Query:  parsed.RawQuery,

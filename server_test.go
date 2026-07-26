@@ -55,10 +55,22 @@ func TestServer(t *testing.T) {
 		assertResponse(t, res, "59 The URL is malformed\r\n")
 	})
 
-	t.Run("relative path", func(t *testing.T) {
+	t.Run("no scheme", func(t *testing.T) {
 		addr := startServer(t, cert, nil)
-		res := send(t, addr, "relative-path\r\n")
-		assertResponse(t, res, "59 The URL path is relative\r\n")
+		res := send(t, addr, "//example.com/path\r\n")
+		assertResponse(t, res, "59 The URL has no scheme\r\n")
+	})
+
+	t.Run("unsupported scheme", func(t *testing.T) {
+		addr := startServer(t, cert, nil)
+		res := send(t, addr, "https://example.com/path\r\n")
+		assertResponse(t, res, "53 Unsupported protocol\r\n")
+	})
+
+	t.Run("no host", func(t *testing.T) {
+		addr := startServer(t, cert, nil)
+		res := send(t, addr, "gemini:///path\r\n")
+		assertResponse(t, res, "59 The URL has no host\r\n")
 	})
 
 	t.Run("path with control characters", func(t *testing.T) {
