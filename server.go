@@ -3,6 +3,7 @@ package gemini
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -104,19 +105,23 @@ type ResponseWriter interface {
 // automatically sends a StatusSuccess response with media type "text/gemini"
 // and no content.
 //
+// The context passed to the handler is derived from the context passed to
+// [Server.ListenAndServe]. The context passed to the handler will always be
+// cancelled during the shutdown of a server.
+//
 // While a handler should deal with their own panics, the server intercepts
 // and swallows a panic thrown by a handler. Unless a response has already
 // been sent to the client, panics result in StatusCGIError responses.
 type Handler interface {
-	Handle(r *Request, w ResponseWriter)
+	Handle(ctx context.Context, r *Request, w ResponseWriter)
 }
 
 // HandlerFunc is an implementation of Handler using a plain function.
-type HandlerFunc func(r *Request, w ResponseWriter)
+type HandlerFunc func(ctx context.Context, r *Request, w ResponseWriter)
 
 // Handle implements Handler.
-func (f HandlerFunc) Handle(r *Request, w ResponseWriter) {
-	f(r, w)
+func (f HandlerFunc) Handle(ctx context.Context, r *Request, w ResponseWriter) {
+	f(ctx, r, w)
 }
 
 // Server is a Gemini server. A Server can be safely used by multiple
@@ -139,58 +144,48 @@ type Server struct {
 	// by a single request. If not specified, no timeout is set.
 	Timeout time.Duration
 	// ReadTimeout sets the timeout for read operations performed by a single
-	// request. If not specified, no read timeout is set.
+	// request. If not specified, no read timeout is set. If both Timeout and
+	// ReadTimeout are specified, ReadTimeout overrides Timeout.
 	ReadTimeout time.Duration
 	// WriteTimeout sets the timeout for write operations performed by a
-	// single request. If not specified, no read timeout is set.
+	// single request. If not specified, no read timeout is set. If both
+	// Timeout and WriteTimeout are specified, WriteTimeout overrides Timeout.
 	WriteTimeout time.Duration
 
 	mu       sync.Mutex
 	listener net.Listener
 }
 
-// ListenAndServe starts a TLS connection over TCP, and serves Gemini clients
-// connecting to this server. Returns an error if a failure occurred when
-// setting up the server. ListenAndServer blocks until the server is closed
-// and any in-flight request is processed.
-func (s *Server) ListenAndServe() error {
+// ListenAndServe starts a TLS connection over TCP and serves Gemini clients
+// connecting to this server. ListenAndServer blocks until the context is
+// cancelled. When the context is cancelled, ListenAndServe closes the
+// underlying listener, waits until every in-flight request is processed, and
+// returns an error wrapping the context cancellation error. ListenAndServe
+// always returns an error.
+func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err := s.listen(); err != nil {
 		return fmt.Errorf("listen: %v", err)
 	}
 
-	if err := s.serve(); err != nil {
-		return fmt.Errorf("serve: %v", err)
+	if err := s.serve(ctx); err != nil {
+		return fmt.Errorf("serve: %w", err)
 	}
 
 	return nil
-}
-
-// Close stops the server. Returns an error if the server is not listening.
-func (s *Server) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.listener == nil {
-		return fmt.Errorf("server not listening")
-	}
-
-	listener := s.listener
-	s.listener = nil
-
-	return listener.Close()
 }
 
 // Addr returns the address of this server. If the server is not listening,
 // returns the empty string.
 func (s *Server) Addr() string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	listener := s.listener
+	s.mu.Unlock()
 
-	if s.listener != nil {
-		return s.listener.Addr().String()
+	if listener == nil {
+		return ""
 	}
 
-	return ""
+	return listener.Addr().String()
 }
 
 func (s *Server) listen() error {
@@ -216,11 +211,7 @@ func (s *Server) listen() error {
 	return nil
 }
 
-func (s *Server) addr() string {
-	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
-}
-
-func (s *Server) serve() error {
+func (s *Server) serve(ctx context.Context) error {
 	s.mu.Lock()
 	listener := s.listener
 	s.mu.Unlock()
@@ -229,111 +220,135 @@ func (s *Server) serve() error {
 		return fmt.Errorf("server is not listening")
 	}
 
+	defer func() {
+		_ = listener.Close()
+	}()
+
 	var wg sync.WaitGroup
 
 	defer wg.Wait()
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	for {
-		conn, err := listener.Accept()
+		conn, err := s.accept(ctx, listener)
 		if err != nil {
-			return nil
+			return fmt.Errorf("accept: %w", err)
 		}
 
 		wg.Go(func() {
-			s.handle(conn)
+			s.handle(ctx, conn)
 		})
 	}
 }
 
-func (s *Server) handle(conn net.Conn) {
+func (s *Server) addr() string {
+	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
+}
+
+func (s *Server) accept(ctx context.Context, listener net.Listener) (net.Conn, error) {
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+
+	ch := make(chan result, 1)
+
+	go func() {
+		conn, err := listener.Accept()
+		ch <- result{conn, err}
+	}()
+
+	select {
+	case result := <-ch:
+		return result.conn, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *Server) handle(ctx context.Context, conn net.Conn) {
+	var rwc io.ReadWriteCloser
+
+	rwc = timeoutReadWriteCloser{
+		timeout:      s.Timeout,
+		readTimeout:  s.ReadTimeout,
+		writeTimeout: s.WriteTimeout,
+		rwc:          conn,
+	}
+
+	rwc = contextAwareReadWriteCloser{
+		ctx: ctx,
+		rwc: rwc,
+	}
+
 	defer func() {
-		_ = conn.Close()
+		_ = rwc.Close()
 	}()
 
 	now := time.Now()
 
-	if s.Timeout != 0 {
-		conn.SetDeadline(now.Add(s.Timeout))
-	}
-
-	if s.ReadTimeout != 0 {
-		conn.SetReadDeadline(now.Add(s.ReadTimeout))
-	}
-
-	if s.WriteTimeout != 0 {
-		conn.SetWriteDeadline(now.Add(s.WriteTimeout))
-	}
-
-	data, err := bufio.NewReader(io.LimitReader(conn, 1024+1+1)).ReadBytes('\n')
+	data, err := bufio.NewReader(io.LimitReader(rwc, 1024+1+1)).ReadBytes('\n')
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			writeHeader(conn, StatusBadRequest, "Request is too long")
+			writeHeader(rwc, StatusBadRequest, "Request is too long")
 		} else {
-			writeHeader(conn, StatusTemporaryFailure, "Unable to read")
+			writeHeader(rwc, StatusTemporaryFailure, "Unable to read")
 		}
 		return
 	}
 
 	if !bytes.HasSuffix(data, []byte{'\r', '\n'}) {
-		writeHeader(conn, StatusBadRequest, "Request is malformed")
+		writeHeader(rwc, StatusBadRequest, "Request is malformed")
 		return
 	}
 
 	if len(data) < 3 {
-		writeHeader(conn, StatusBadRequest, "Request is too short")
+		writeHeader(rwc, StatusBadRequest, "Request is too short")
 		return
 	}
 
 	parsed, err := url.Parse(string(data[0 : len(data)-2]))
 	if err != nil {
-		writeHeader(conn, StatusBadRequest, "The URL is malformed")
+		writeHeader(rwc, StatusBadRequest, "The URL is malformed")
 		return
 	}
 
 	if parsed.Path != "" && !strings.HasPrefix(parsed.Path, "/") {
-		writeHeader(conn, StatusBadRequest, "The URL path is relative")
+		writeHeader(rwc, StatusBadRequest, "The URL path is relative")
 		return
 	}
 
 	if parsed.User != nil {
-		writeHeader(conn, StatusBadRequest, "The URL has user info")
+		writeHeader(rwc, StatusBadRequest, "The URL has user info")
 		return
 	}
 
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
+	cert, err := s.readCertificate(ctx, conn)
+	if err != nil {
 		return
-	}
-
-	if err := tlsConn.Handshake(); err != nil {
-		return
-	}
-
-	var cert *x509.Certificate
-
-	if certs := tlsConn.ConnectionState().PeerCertificates; len(certs) > 0 {
-		cert = certs[0]
 	}
 
 	if cert != nil {
 		if now.Before(cert.NotBefore) {
-			writeHeader(conn, StatusCerttificateNotValid, "Certificate not yet valid")
+			writeHeader(rwc, StatusCerttificateNotValid, "Certificate not yet valid")
 			return
 		}
 
 		if cert.NotAfter.Before(now) {
-			writeHeader(conn, StatusCerttificateNotValid, "Certificate expired")
+			writeHeader(rwc, StatusCerttificateNotValid, "Certificate expired")
 			return
 		}
 
 		if err := cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature); err != nil {
-			writeHeader(conn, StatusCerttificateNotValid, "Invalid signature")
+			writeHeader(rwc, StatusCerttificateNotValid, "Invalid signature")
 			return
 		}
 	}
 
 	if s.Handler == nil {
-		writeHeader(conn, StatusNotFound, "")
+		writeHeader(rwc, StatusNotFound, "")
 		return
 	}
 
@@ -349,20 +364,54 @@ func (s *Server) handle(conn net.Conn) {
 	}
 
 	responseWriter := responseWriter{
-		w: conn,
+		w: rwc,
 	}
 
-	func() {
-		defer func() {
-			if v := recover(); v != nil {
-				responseWriter.WriteHeader(StatusCGIError, "Panic detected")
-			}
-		}()
-
-		s.Handler.Handle(&request, &responseWriter)
-	}()
+	s.callHandler(ctx, &request, &responseWriter)
 
 	responseWriter.writeDefaultHeader()
+}
+
+func (s *Server) callHandler(ctx context.Context, r *Request, w ResponseWriter) {
+	defer func() {
+		if v := recover(); v != nil {
+			w.WriteHeader(StatusCGIError, "Panic")
+		}
+	}()
+
+	s.Handler.Handle(ctx, r, w)
+}
+
+func (s *Server) readCertificate(ctx context.Context, conn net.Conn) (*x509.Certificate, error) {
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		return nil, fmt.Errorf("not a TLS connection")
+	}
+
+	if err := s.handshake(ctx, tlsConn); err != nil {
+		return nil, fmt.Errorf("handshake: %v", err)
+	}
+
+	if certs := tlsConn.ConnectionState().PeerCertificates; len(certs) > 0 {
+		return certs[0], nil
+	}
+
+	return nil, nil
+}
+
+func (s *Server) handshake(ctx context.Context, conn *tls.Conn) error {
+	ch := make(chan error, 1)
+
+	go func() {
+		ch <- conn.Handshake()
+	}()
+
+	select {
+	case err := <-ch:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 type responseWriter struct {
