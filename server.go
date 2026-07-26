@@ -219,6 +219,7 @@ func (s *Server) listen() error {
 	config := tls.Config{
 		Certificates: []tls.Certificate{s.Cert},
 		ClientAuth:   tls.RequestClientCert,
+		MinVersion:   tls.VersionTLS12,
 	}
 
 	listener, err := tls.Listen("tcp", s.addr(), &config)
