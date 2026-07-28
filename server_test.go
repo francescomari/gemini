@@ -1,7 +1,6 @@
 package gemini_test
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,12 +8,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,8 +59,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("handler", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.NotNil(t, ctx)
+		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 			assert.Equal(t, "gemini", r.Scheme)
 			assert.Equal(t, "example.com", r.Host)
 			assert.Equal(t, 1234, r.Port)
@@ -76,7 +74,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("empty path is normalized", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 			assert.Equal(t, "/", r.Path)
 		})
 		addr := startServer(t, cert, handler)
@@ -84,7 +82,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("final slash is preserved", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 			assert.Equal(t, "/foo/", r.Path)
 		})
 		addr := startServer(t, cert, handler)
@@ -92,7 +90,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("client certificate", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 			assert.NotNil(t, r.Cert)
 			assert.Equal(t, "client", r.Cert.Subject.CommonName)
 		})
@@ -144,7 +142,7 @@ func TestServer(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+				handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 					assert.PanicsWithValue(t, test.value, func() {
 						w.WriteHeader(test.statusCode, test.meta)
 					})
@@ -156,7 +154,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("panic", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
 			panic("something went wrong")
 		})
 		addr := startServer(t, cert, handler)
@@ -166,7 +164,7 @@ func TestServer(t *testing.T) {
 }
 
 func handlerShouldNotBeCalled(t *testing.T) gemini.HandlerFunc {
-	return func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+	return func(r *gemini.Request, w gemini.ResponseWriter) {
 		assert.Fail(t, "the handler should not be called")
 	}
 }
@@ -281,29 +279,33 @@ func newSerialNumber(t *testing.T) *big.Int {
 func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) string {
 	t.Helper()
 
+	var wg sync.WaitGroup
+
+	t.Cleanup(func() {
+		wg.Wait()
+	})
+
 	listener, err := net.Listen("tcp", net.JoinHostPort("localhost", "0"))
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 
-	done := make(chan struct{})
-
 	t.Cleanup(func() {
-		<-done
+		if err := listener.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
 	})
 
-	go func() {
-		defer close(done)
-
+	wg.Go(func() {
 		server := gemini.Server{
 			Cert:    cert,
 			Handler: handler,
 		}
 
-		if err := server.Serve(t.Context(), listener); !errors.Is(err, context.Canceled) {
-			t.Errorf("serve: %v", err)
+		if err := server.Serve(listener); err != nil {
+			t.Logf("serve: %v", err)
 		}
-	}()
+	})
 
 	return listener.Addr().String()
 }
