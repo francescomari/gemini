@@ -32,64 +32,31 @@ func TestServer(t *testing.T) {
 		require.Equal(t, "51\r\n", res)
 	})
 
-	t.Run("request too long", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, fmt.Sprintf("/%s\r\n", strings.Repeat("x", 1024)))
-		require.Equal(t, "59 Request is too long\r\n", res)
-	})
+	t.Run("server validation", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			request  string
+			response string
+		}{
+			{"request too long", fmt.Sprintf("/%s\r\n", strings.Repeat("x", 1024)), "59 Request is too long\r\n"},
+			{"request malformed", "gemini://example.com/\n", "59 Request is malformed\r\n"},
+			{"request too short", "\r\n", "59 Request is too short\r\n"},
+			{"malformed url", ":\r\n", "59 The URL is malformed\r\n"},
+			{"no scheme", "//example.com/path\r\n", "59 The URL has no scheme\r\n"},
+			{"unsupported scheme", "https://example.com/path\r\n", "53 Unsupported protocol\r\n"},
+			{"no host", "gemini:///path\r\n", "59 The URL has no host\r\n"},
+			{"path with control characters", "gemini://example.com/x%0Ax\r\n", "59 The URL path contains control characters\r\n"},
+			{"user info", "gemini://user@example.com/path\r\n", "59 The URL has user info\r\n"},
+			{"fragment", "gemini://example.com/path#fragment\r\n", "59 The URL has a fragment\r\n"},
+		}
 
-	t.Run("request malformed", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "gemini://example.com/\n")
-		require.Equal(t, "59 Request is malformed\r\n", res)
-	})
-
-	t.Run("request too short", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "\r\n")
-		require.Equal(t, "59 Request is too short\r\n", res)
-	})
-
-	t.Run("malformed url", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, ":\r\n")
-		require.Equal(t, "59 The URL is malformed\r\n", res)
-	})
-
-	t.Run("no scheme", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "//example.com/path\r\n")
-		require.Equal(t, "59 The URL has no scheme\r\n", res)
-	})
-
-	t.Run("unsupported scheme", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "https://example.com/path\r\n")
-		require.Equal(t, "53 Unsupported protocol\r\n", res)
-	})
-
-	t.Run("no host", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "gemini:///path\r\n")
-		require.Equal(t, "59 The URL has no host\r\n", res)
-	})
-
-	t.Run("path with control characters", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "gemini://example.com/x%0Ax\r\n")
-		require.Equal(t, "59 The URL path contains control characters\r\n", res)
-	})
-
-	t.Run("user info", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "gemini://user@example.com/path\r\n")
-		require.Equal(t, "59 The URL has user info\r\n", res)
-	})
-
-	t.Run("fragment", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendAnonymous(t, addr, "gemini://example.com/path#fragment\r\n")
-		require.Equal(t, "59 The URL has a fragment\r\n", res)
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				addr := startServer(t, cert, handlerShouldNotBeCalled(t))
+				res := sendAnonymous(t, addr, test.request)
+				require.Equal(t, test.response, res)
+			})
+		}
 	})
 
 	t.Run("handler", func(t *testing.T) {
@@ -134,85 +101,61 @@ func TestServer(t *testing.T) {
 		require.Equal(t, "20 text/gemini\r\n", res)
 	})
 
-	t.Run("client certificate not yet valid", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendWithIdentity(t, newClientCertificateNotYetValid(t), addr, "gemini://example.com/\r\n")
-		require.Equal(t, "62 Certificate not yet valid\r\n", res)
+	t.Run("client certificate validation", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			cert     tls.Certificate
+			response string
+		}{
+			{"not yet valid", newClientCertificateNotYetValid(t), "62 Certificate not yet valid\r\n"},
+			{"expired", newClientCertificateExpired(t), "62 Certificate expired\r\n"},
+			{"invalid signature", newClientCertificateInvalidSignature(t), "62 Invalid signature\r\n"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				addr := startServer(t, cert, handlerShouldNotBeCalled(t))
+				res := sendWithIdentity(t, test.cert, addr, "gemini://example.com/\r\n")
+				require.Equal(t, test.response, res)
+			})
+		}
 	})
 
-	t.Run("client certificate expired", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendWithIdentity(t, newClientCertificateExpired(t), addr, "gemini://example.com/\r\n")
-		require.Equal(t, "62 Certificate expired\r\n", res)
+	t.Run("writer panic", func(t *testing.T) {
+		tests := []struct {
+			name       string
+			statusCode gemini.StatusCode
+			meta       string
+			value      string
+		}{
+			{"status code too low", 9, "", "invalid status code"},
+			{"status code too high", 70, "", "invalid status code"},
+			{"unspecified status code", 21, "", "invalid status code"},
+			{"control characters", gemini.StatusTemporaryFailure, "\n", "meta contains control characters"},
+			{"input without meta", gemini.StatusInputExpected, "", "sending an input without a prompt"},
+			{"sensitive input without meta", gemini.StatusSensitiveInput, "", "sending a sensitive input without a prompt"},
+			{"success without media type", gemini.StatusSuccess, "", "sending a success without a media type"},
+			{"invalid media type", gemini.StatusSuccess, "not a media type", "invalid media type"},
+			{"temporary redirection without uri", gemini.StatusTemporaryRedirection, "", "sending a temporary redirection without a URI"},
+			{"permanent redirection without uri", gemini.StatusPermanentRedirection, "", "sending a permanent redirection without a URI"},
+			{"temporary redirection with invalid uri", gemini.StatusTemporaryRedirection, ":", "invalid URI"},
+			{"permanent redirection with invalid uri", gemini.StatusPermanentRedirection, ":", "invalid URI"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+					assert.PanicsWithValue(t, test.value, func() {
+						w.WriteHeader(test.statusCode, test.meta)
+					})
+				})
+				addr := startServer(t, cert, handler)
+				sendAnonymous(t, addr, "gemini://example.com/\r\n")
+			})
+		}
 	})
 
-	t.Run("client certificate signature invalid", func(t *testing.T) {
-		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
-		res := sendWithIdentity(t, newClientCertificateInvalidSignature(t), addr, "gemini://example.com/\r\n")
-		require.Equal(t, "62 Invalid signature\r\n", res)
-	})
-
-	t.Run("status code too low", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, 9, "", "invalid status code"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("status code too high", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, 70, "", "invalid status code"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("status code in range but undefined", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, 21, "", "invalid status code"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("meta with control characters", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryFailure, "x\nx", "meta contains control characters"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("input expected requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusInputExpected, "", "sending an input without a prompt"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("sensitive input expected requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSensitiveInput, "", "sending a sensitive input without a prompt"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("success requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSuccess, "", "sending a success without a media type"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("success requires valid media type", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSuccess, "not a media type", "invalid media type"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("temporary redirect requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryRedirection, "", "sending a temporary redirection without a URI"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("temporary redirect requires valid url", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryRedirection, ":", "invalid URL"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("permanent redirect requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusPermanentRedirection, "", "sending a permanent redirection without a URI"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("permanent redirect requires valid url", func(t *testing.T) {
-		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusPermanentRedirection, ":", "invalid URL"))
-		sendAnonymous(t, addr, "gemini://example.com/\r\n")
-	})
-
-	t.Run("panic handling", func(t *testing.T) {
+	t.Run("panic", func(t *testing.T) {
 		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			panic("something went wrong")
 		})
@@ -220,14 +163,6 @@ func TestServer(t *testing.T) {
 		res := sendAnonymous(t, addr, "gemini://example.com/\r\n")
 		require.Equal(t, "42 Panic\r\n", res)
 	})
-}
-
-func handlerPanicsWithValue(t *testing.T, statusCode gemini.StatusCode, meta string, value string) gemini.HandlerFunc {
-	return func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-		assert.PanicsWithValue(t, value, func() {
-			w.WriteHeader(statusCode, meta)
-		})
-	}
 }
 
 func handlerShouldNotBeCalled(t *testing.T) gemini.HandlerFunc {

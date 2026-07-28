@@ -434,9 +434,9 @@ func (rw *responseWriter) validateMeta(statusCode StatusCode, meta string) {
 		case StatusSuccess:
 			rw.validateMediaType(meta)
 		case StatusTemporaryRedirection:
-			rw.validateURL(meta)
+			rw.validateURI(meta)
 		case StatusPermanentRedirection:
-			rw.validateURL(meta)
+			rw.validateURI(meta)
 		}
 	}
 }
@@ -455,9 +455,9 @@ func (rw *responseWriter) validateMediaType(s string) {
 	}
 }
 
-func (rw *responseWriter) validateURL(s string) {
+func (rw *responseWriter) validateURI(s string) {
 	if _, err := url.Parse(s); err != nil {
-		panic("invalid URL")
+		panic("invalid URI")
 	}
 }
 
