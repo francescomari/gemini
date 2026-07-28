@@ -33,61 +33,61 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("request too long", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, fmt.Sprintf("/%s\r\n", strings.Repeat("x", 1024)))
 		require.Equal(t, "59 Request is too long\r\n", res)
 	})
 
 	t.Run("request malformed", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "gemini://example.com/\n")
 		require.Equal(t, "59 Request is malformed\r\n", res)
 	})
 
 	t.Run("request too short", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "\r\n")
 		require.Equal(t, "59 Request is too short\r\n", res)
 	})
 
 	t.Run("malformed url", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, ":\r\n")
 		require.Equal(t, "59 The URL is malformed\r\n", res)
 	})
 
 	t.Run("no scheme", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "//example.com/path\r\n")
 		require.Equal(t, "59 The URL has no scheme\r\n", res)
 	})
 
 	t.Run("unsupported scheme", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "https://example.com/path\r\n")
 		require.Equal(t, "53 Unsupported protocol\r\n", res)
 	})
 
 	t.Run("no host", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "gemini:///path\r\n")
 		require.Equal(t, "59 The URL has no host\r\n", res)
 	})
 
 	t.Run("path with control characters", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "gemini://example.com/x%0Ax\r\n")
 		require.Equal(t, "59 The URL path contains control characters\r\n", res)
 	})
 
 	t.Run("user info", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "gemini://user@example.com/path\r\n")
 		require.Equal(t, "59 The URL has user info\r\n", res)
 	})
 
 	t.Run("fragment", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendAnonymous(t, addr, "gemini://example.com/path#fragment\r\n")
 		require.Equal(t, "59 The URL has a fragment\r\n", res)
 	})
@@ -131,19 +131,19 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("client certificate not yet valid", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendWithIdentity(t, newClientCertificateNotYetValid(t), addr, "gemini://example.com/\r\n")
 		require.Equal(t, "62 Certificate not yet valid\r\n", res)
 	})
 
 	t.Run("client certificate expired", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendWithIdentity(t, newClientCertificateExpired(t), addr, "gemini://example.com/\r\n")
 		require.Equal(t, "62 Certificate expired\r\n", res)
 	})
 
 	t.Run("client certificate signature invalid", func(t *testing.T) {
-		addr := startServer(t, cert, nil)
+		addr := startServer(t, cert, handlerShouldNotBeCalled(t))
 		res := sendWithIdentity(t, newClientCertificateInvalidSignature(t), addr, "gemini://example.com/\r\n")
 		require.Equal(t, "62 Invalid signature\r\n", res)
 	})
@@ -251,6 +251,12 @@ func TestServer(t *testing.T) {
 		res := sendAnonymous(t, addr, "gemini://example.com/\r\n")
 		require.Equal(t, "42 Panic\r\n", res)
 	})
+}
+
+func handlerShouldNotBeCalled(t *testing.T) gemini.HandlerFunc {
+	return func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		assert.Fail(t, "the handler should not be called")
+	}
 }
 
 func newServerCertificate(t *testing.T) tls.Certificate {
