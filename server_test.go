@@ -150,96 +150,108 @@ func TestServer(t *testing.T) {
 
 	t.Run("status code too low", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid status code")
-			w.WriteHeader(9, "")
+			assert.PanicsWithValue(t, "invalid status code", func() {
+				w.WriteHeader(9, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("status code too high", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid status code")
-			w.WriteHeader(70, "")
+			assert.PanicsWithValue(t, "invalid status code", func() {
+				w.WriteHeader(70, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("status code in range but undefined", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid status code")
-			w.WriteHeader(21, "")
+			assert.PanicsWithValue(t, "invalid status code", func() {
+				w.WriteHeader(21, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("meta with control characters", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "meta contains control characters")
-			w.WriteHeader(gemini.StatusTemporaryFailure, "x\nx")
+			assert.PanicsWithValue(t, "meta contains control characters", func() {
+				w.WriteHeader(gemini.StatusTemporaryFailure, "x\nx")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("input expected requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "sending an input without a prompt")
-			w.WriteHeader(gemini.StatusInputExpected, "")
+			assert.PanicsWithValue(t, "sending an input without a prompt", func() {
+				w.WriteHeader(gemini.StatusInputExpected, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("sensitive input expected requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "sending a sensitive input without a prompt")
-			w.WriteHeader(gemini.StatusSensitiveInput, "")
+			assert.PanicsWithValue(t, "sending a sensitive input without a prompt", func() {
+				w.WriteHeader(gemini.StatusSensitiveInput, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("success requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "sending a success without a media type")
-			w.WriteHeader(gemini.StatusSuccess, "")
+			assert.PanicsWithValue(t, "sending a success without a media type", func() {
+				w.WriteHeader(gemini.StatusSuccess, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("success requires valid media type", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid media type")
-			w.WriteHeader(gemini.StatusSuccess, "not some media type")
+			assert.PanicsWithValue(t, "invalid media type", func() {
+				w.WriteHeader(gemini.StatusSuccess, "not some media type")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("temporary redirect requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "sending a temporary redirection without a URI")
-			w.WriteHeader(gemini.StatusTemporaryRedirection, "")
+			assert.PanicsWithValue(t, "sending a temporary redirection without a URI", func() {
+				w.WriteHeader(gemini.StatusTemporaryRedirection, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("temporary redirect requires valid url", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid URL")
-			w.WriteHeader(gemini.StatusTemporaryRedirection, ":")
+			assert.PanicsWithValue(t, "invalid URL", func() {
+				w.WriteHeader(gemini.StatusTemporaryRedirection, ":")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("permanent redirect requires meta", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "sending a permanent redirection without a URI")
-			w.WriteHeader(gemini.StatusPermanentRedirection, "")
+			assert.PanicsWithValue(t, "sending a permanent redirection without a URI", func() {
+				w.WriteHeader(gemini.StatusPermanentRedirection, "")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("permanent redirect requires valid url", func(t *testing.T) {
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			defer assertPanics(t, "invalid URL")
-			w.WriteHeader(gemini.StatusPermanentRedirection, ":")
+			assert.PanicsWithValue(t, "invalid URL", func() {
+				w.WriteHeader(gemini.StatusPermanentRedirection, ":")
+			})
 		}))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
@@ -441,12 +453,4 @@ func send(t *testing.T, config *tls.Config, addr string, request string) string 
 	}
 
 	return string(data)
-}
-
-func assertPanics(t *testing.T, expected string) {
-	s, ok := recover().(string)
-
-	if assert.True(t, ok) {
-		assert.Equal(t, s, expected)
-	}
 }
