@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -346,10 +347,9 @@ func generateCertificate(t *testing.T, template *x509.Certificate) tls.Certifica
 func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) string {
 	t.Helper()
 
-	server := gemini.Server{
-		Host:    "localhost",
-		Cert:    cert,
-		Handler: handler,
+	listener, err := net.Listen("tcp", net.JoinHostPort("localhost", "0"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
 	}
 
 	done := make(chan struct{})
@@ -361,23 +361,17 @@ func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) str
 	go func() {
 		defer close(done)
 
-		if err := server.ListenAndServe(t.Context()); !errors.Is(err, context.Canceled) {
-			t.Errorf("listen and serve: %v", err)
+		server := gemini.Server{
+			Cert:    cert,
+			Handler: handler,
+		}
+
+		if err := server.Serve(t.Context(), listener); !errors.Is(err, context.Canceled) {
+			t.Errorf("serve: %v", err)
 		}
 	}()
 
-	for {
-		if addr := server.Addr(); addr != "" {
-			return addr
-		}
-
-		select {
-		case <-done:
-			t.Fatalf("server never returned an address")
-		default:
-			continue
-		}
-	}
+	return listener.Addr().String()
 }
 
 func send(t *testing.T, addr string, url string) string {

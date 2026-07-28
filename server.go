@@ -146,12 +146,6 @@ func (f HandlerFunc) Handle(ctx context.Context, r *Request, w ResponseWriter) {
 // Server is a Gemini server. A Server can be safely used by multiple
 // goroutines.
 type Server struct {
-	// The host this server will listen on. If not provided, the server
-	// listens on all available interfaces on the system.
-	Host string
-	// The port this server will listen on. If not provided, the server
-	// listens on a randomly allocated port.
-	Port int
 	// The server certificate. Self-signed certificates are supported and
 	// encouraged. This field is mandatory.
 	Cert tls.Certificate
@@ -170,76 +164,20 @@ type Server struct {
 	// single request. If not specified, no write timeout is set. If both
 	// Timeout and WriteTimeout are specified, WriteTimeout overrides Timeout.
 	WriteTimeout time.Duration
-
-	mu       sync.Mutex
-	listener net.Listener
 }
 
-// ListenAndServe starts a TLS listener over TCP and serves Gemini clients
-// connecting to this server. ListenAndServe blocks until the context is
-// cancelled or accepting a connection fails. In both cases, ListenAndServe
-// closes the underlying listener, waits until every in-flight request is
-// processed, and returns a non-nil error wrapping the cause. Callers can use
-// errors.Is(err, context.Canceled) to distinguish a deliberate shutdown from
-// an accept failure. ListenAndServe always returns an error.
-func (s *Server) ListenAndServe(ctx context.Context) error {
-	if err := s.listen(); err != nil {
-		return fmt.Errorf("listen: %v", err)
-	}
-
-	if err := s.serve(ctx); err != nil {
-		return fmt.Errorf("serve: %w", err)
-	}
-
-	return nil
-}
-
-// Addr returns the address of this server. If the server is not listening,
-// returns the empty string.
-func (s *Server) Addr() string {
-	s.mu.Lock()
-	listener := s.listener
-	s.mu.Unlock()
-
-	if listener == nil {
-		return ""
-	}
-
-	return listener.Addr().String()
-}
-
-func (s *Server) listen() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.listener != nil {
-		return fmt.Errorf("server already started")
-	}
-
-	config := tls.Config{
+// Serve wraps the provided listener in a TLS listener and serves Gemini clients
+// connecting to this server. Serve blocks until the context is cancelled or
+// accepting a connection fails. In both cases, Serve waits until every
+// in-flight request is processed and returns a non-nil error wrapping the
+// cause. Callers can use errors.Is(err, context.Canceled) to distinguish a
+// deliberate shutdown from an accept failure. Serve always returns an error.
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	listener = tls.NewListener(listener, &tls.Config{
 		Certificates: []tls.Certificate{s.Cert},
 		ClientAuth:   tls.RequestClientCert,
 		MinVersion:   tls.VersionTLS12,
-	}
-
-	listener, err := tls.Listen("tcp", s.addr(), &config)
-	if err != nil {
-		return fmt.Errorf("listen: %v", err)
-	}
-
-	s.listener = listener
-
-	return nil
-}
-
-func (s *Server) serve(ctx context.Context) error {
-	s.mu.Lock()
-	listener := s.listener
-	s.mu.Unlock()
-
-	if listener == nil {
-		return fmt.Errorf("server is not listening")
-	}
+	})
 
 	defer func() {
 		_ = listener.Close()
@@ -262,10 +200,6 @@ func (s *Server) serve(ctx context.Context) error {
 			s.handle(ctx, conn)
 		})
 	}
-}
-
-func (s *Server) addr() string {
-	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 }
 
 func (s *Server) accept(ctx context.Context, listener net.Listener) (net.Conn, error) {
