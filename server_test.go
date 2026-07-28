@@ -93,7 +93,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("handler", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			assert.NotNil(t, ctx)
 			assert.Equal(t, "gemini", r.Scheme)
 			assert.Equal(t, "example.com", r.Host)
@@ -102,30 +102,34 @@ func TestServer(t *testing.T) {
 			assert.Equal(t, "query", r.Query)
 			assert.Nil(t, r.Cert)
 			w.Write([]byte("Some text\r\n"))
-		}))
+		})
+		addr := startServer(t, cert, handler)
 		res := sendAnonymous(t, addr, "gemini://example.com:1234/path?query\r\n")
 		require.Equal(t, "20 text/gemini\r\nSome text\r\n", res)
 	})
 
 	t.Run("empty path is normalized", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			assert.Equal(t, "/", r.Path)
-		}))
+		})
+		addr := startServer(t, cert, handler)
 		sendAnonymous(t, addr, "gemini://example.com\r\n")
 	})
 
 	t.Run("final slash is preserved", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			assert.Equal(t, "/foo/", r.Path)
-		}))
+		})
+		addr := startServer(t, cert, handler)
 		sendAnonymous(t, addr, "gemini://example.com/foo/\r\n")
 	})
 
 	t.Run("client certificate", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			assert.NotNil(t, r.Cert)
 			assert.Equal(t, "client", r.Cert.Subject.CommonName)
-		}))
+		})
+		addr := startServer(t, cert, handler)
 		res := sendWithIdentity(t, newClientCertificate(t), addr, "gemini://example.com/\r\n")
 		require.Equal(t, "20 text/gemini\r\n", res)
 	})
@@ -149,120 +153,81 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("status code too low", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid status code", func() {
-				w.WriteHeader(9, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, 9, "", "invalid status code"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("status code too high", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid status code", func() {
-				w.WriteHeader(70, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, 70, "", "invalid status code"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("status code in range but undefined", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid status code", func() {
-				w.WriteHeader(21, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, 21, "", "invalid status code"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("meta with control characters", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "meta contains control characters", func() {
-				w.WriteHeader(gemini.StatusTemporaryFailure, "x\nx")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryFailure, "x\nx", "meta contains control characters"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("input expected requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "sending an input without a prompt", func() {
-				w.WriteHeader(gemini.StatusInputExpected, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusInputExpected, "", "sending an input without a prompt"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("sensitive input expected requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "sending a sensitive input without a prompt", func() {
-				w.WriteHeader(gemini.StatusSensitiveInput, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSensitiveInput, "", "sending a sensitive input without a prompt"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("success requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "sending a success without a media type", func() {
-				w.WriteHeader(gemini.StatusSuccess, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSuccess, "", "sending a success without a media type"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("success requires valid media type", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid media type", func() {
-				w.WriteHeader(gemini.StatusSuccess, "not some media type")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusSuccess, "not a media type", "invalid media type"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("temporary redirect requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "sending a temporary redirection without a URI", func() {
-				w.WriteHeader(gemini.StatusTemporaryRedirection, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryRedirection, "", "sending a temporary redirection without a URI"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("temporary redirect requires valid url", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid URL", func() {
-				w.WriteHeader(gemini.StatusTemporaryRedirection, ":")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusTemporaryRedirection, ":", "invalid URL"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("permanent redirect requires meta", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "sending a permanent redirection without a URI", func() {
-				w.WriteHeader(gemini.StatusPermanentRedirection, "")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusPermanentRedirection, "", "sending a permanent redirection without a URI"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("permanent redirect requires valid url", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
-			assert.PanicsWithValue(t, "invalid URL", func() {
-				w.WriteHeader(gemini.StatusPermanentRedirection, ":")
-			})
-		}))
+		addr := startServer(t, cert, handlerPanicsWithValue(t, gemini.StatusPermanentRedirection, ":", "invalid URL"))
 		sendAnonymous(t, addr, "gemini://example.com/\r\n")
 	})
 
 	t.Run("panic handling", func(t *testing.T) {
-		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		handler := gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			panic("something went wrong")
-		}))
+		})
+		addr := startServer(t, cert, handler)
 		res := sendAnonymous(t, addr, "gemini://example.com/\r\n")
 		require.Equal(t, "42 Panic\r\n", res)
 	})
+}
+
+func handlerPanicsWithValue(t *testing.T, statusCode gemini.StatusCode, meta string, value string) gemini.HandlerFunc {
+	return func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
+		assert.PanicsWithValue(t, value, func() {
+			w.WriteHeader(statusCode, meta)
+		})
+	}
 }
 
 func handlerShouldNotBeCalled(t *testing.T) gemini.HandlerFunc {
