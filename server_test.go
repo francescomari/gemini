@@ -2,8 +2,9 @@ package gemini_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"strings"
 	"testing"
@@ -20,11 +22,7 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	cert := generateCertificate(t, &x509.Certificate{
-		Subject:   pkix.Name{Organization: []string{"example.com"}},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(time.Hour),
-	})
+	cert := newServerCertificate(t)
 
 	t.Run("no handler", func(t *testing.T) {
 		addr := startServer(t, cert, nil)
@@ -150,61 +148,35 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("client certificate", func(t *testing.T) {
-		clientCert := generateCertificate(t, &x509.Certificate{
-			Subject:   pkix.Name{CommonName: "some-client"},
-			NotBefore: time.Now(),
-			NotAfter:  time.Now().Add(time.Hour),
-		})
-
 		addr := startServer(t, cert, gemini.HandlerFunc(func(ctx context.Context, r *gemini.Request, w gemini.ResponseWriter) {
 			if r.Cert == nil {
 				t.Errorf("no client certificate")
 			}
 
-			if r.Cert.Subject.CommonName != "some-client" {
+			if r.Cert.Subject.CommonName != "client" {
 				t.Errorf("invalid certificate")
 			}
 		}))
 
-		res := sendWithIdentity(t, clientCert, addr, "gemini://example.com/\r\n")
+		res := sendWithIdentity(t, newClientCertificate(t), addr, "gemini://example.com/\r\n")
 		assertResponse(t, res, "20 text/gemini\r\n")
 	})
 
 	t.Run("client certificate not yet valid", func(t *testing.T) {
-		clientCert := generateCertificate(t, &x509.Certificate{
-			Subject:   pkix.Name{CommonName: "some-client"},
-			NotBefore: time.Now().Add(time.Hour),
-			NotAfter:  time.Now().Add(2 * time.Hour),
-		})
-
 		addr := startServer(t, cert, nil)
-		res := sendWithIdentity(t, clientCert, addr, "gemini://example.com/\r\n")
+		res := sendWithIdentity(t, newClientCertificateNotYetValid(t), addr, "gemini://example.com/\r\n")
 		assertResponse(t, res, "62 Certificate not yet valid\r\n")
 	})
 
 	t.Run("client certificate expired", func(t *testing.T) {
-		clientCert := generateCertificate(t, &x509.Certificate{
-			Subject:   pkix.Name{CommonName: "some-client"},
-			NotBefore: time.Now().Add(-2 * time.Hour),
-			NotAfter:  time.Now().Add(-time.Hour),
-		})
-
 		addr := startServer(t, cert, nil)
-		res := sendWithIdentity(t, clientCert, addr, "gemini://example.com/\r\n")
+		res := sendWithIdentity(t, newClientCertificateExpired(t), addr, "gemini://example.com/\r\n")
 		assertResponse(t, res, "62 Certificate expired\r\n")
 	})
 
 	t.Run("client certificate signature invalid", func(t *testing.T) {
-		clientCert := generateCertificate(t, &x509.Certificate{
-			Subject:   pkix.Name{CommonName: "some-client"},
-			NotBefore: time.Now(),
-			NotAfter:  time.Now().Add(time.Hour),
-		})
-
-		clientCert.Leaf.Signature[0] += 1
-
 		addr := startServer(t, cert, nil)
-		res := sendWithIdentity(t, clientCert, addr, "gemini://example.com/\r\n")
+		res := sendWithIdentity(t, newClientCertificateInvalidSignature(t), addr, "gemini://example.com/\r\n")
 		assertResponse(t, res, "62 Invalid signature\r\n")
 	})
 
@@ -313,12 +285,77 @@ func TestServer(t *testing.T) {
 	})
 }
 
-func generateCertificate(t *testing.T, template *x509.Certificate) tls.Certificate {
+func newServerCertificate(t *testing.T) tls.Certificate {
 	t.Helper()
 
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	return newCertificate(t, &x509.Certificate{
+		Subject:      pkix.Name{CommonName: "localhost"},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().AddDate(10, 0, 0),
+		SerialNumber: newSerialNumber(t),
+	})
+}
+
+func newClientCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	return newCertificate(t, &x509.Certificate{
+		Subject:      pkix.Name{CommonName: "client"},
+		NotBefore:    time.Now().AddDate(-5, 0, 0),
+		NotAfter:     time.Now().AddDate(5, 0, 0),
+		SerialNumber: newSerialNumber(t),
+	})
+}
+
+func newClientCertificateNotYetValid(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	return newCertificate(t, &x509.Certificate{
+		Subject:      pkix.Name{CommonName: "client"},
+		NotBefore:    time.Now().AddDate(0, 0, 1),
+		NotAfter:     time.Now().AddDate(10, 0, 1),
+		SerialNumber: newSerialNumber(t),
+	})
+}
+
+func newClientCertificateExpired(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	return newCertificate(t, &x509.Certificate{
+		Subject:      pkix.Name{CommonName: "client"},
+		NotBefore:    time.Now().AddDate(-10, 0, 0),
+		NotAfter:     time.Now().AddDate(-10, 0, -1),
+		SerialNumber: newSerialNumber(t),
+	})
+}
+
+func newClientCertificateInvalidSignature(t *testing.T) tls.Certificate {
+	t.Helper()
+
+	cert := newCertificate(t, &x509.Certificate{
+		Subject:      pkix.Name{CommonName: "client"},
+		NotBefore:    time.Now().AddDate(-5, 0, 0),
+		NotAfter:     time.Now().AddDate(5, 0, 0),
+		SerialNumber: newSerialNumber(t),
+	})
+
+	cert.Leaf.Signature[0] += 1
+
+	return cert
+}
+
+func newCertificate(t *testing.T, template *x509.Certificate) tls.Certificate {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
+	}
+
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
@@ -327,8 +364,8 @@ func generateCertificate(t *testing.T, template *x509.Certificate) tls.Certifica
 	}
 
 	keyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
+		Type:  "EC PRIVATE KEY",
+		Bytes: keyDER,
 	})
 
 	certPEM := pem.EncodeToMemory(&pem.Block{
@@ -342,6 +379,17 @@ func generateCertificate(t *testing.T, template *x509.Certificate) tls.Certifica
 	}
 
 	return cert
+}
+
+func newSerialNumber(t *testing.T) *big.Int {
+	t.Helper()
+
+	serial, err := rand.Int(rand.Reader, big.NewInt(0).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatalf("generate serial number")
+	}
+
+	return serial
 }
 
 func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) string {
