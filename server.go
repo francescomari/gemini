@@ -310,7 +310,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	cert, err := s.readCertificate(conn)
+	cert, err := s.readCertificate(conn.(*tls.Conn))
 	if err != nil {
 		return
 	}
@@ -367,17 +367,12 @@ func (s *Server) callHandler(ctx context.Context, r *Request, w ResponseWriter) 
 	s.Handler.Handle(ctx, r, w)
 }
 
-func (s *Server) readCertificate(conn net.Conn) (*x509.Certificate, error) {
-	tlsConn, ok := conn.(*tls.Conn)
-	if !ok {
-		return nil, fmt.Errorf("not a TLS connection")
-	}
-
-	if err := tlsConn.Handshake(); err != nil {
+func (s *Server) readCertificate(conn *tls.Conn) (*x509.Certificate, error) {
+	if err := conn.Handshake(); err != nil {
 		return nil, fmt.Errorf("handshake: %v", err)
 	}
 
-	if certs := tlsConn.ConnectionState().PeerCertificates; len(certs) > 0 {
+	if certs := conn.ConnectionState().PeerCertificates; len(certs) > 0 {
 		return certs[0], nil
 	}
 
