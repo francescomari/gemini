@@ -3,6 +3,7 @@ package gemini
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -183,6 +184,22 @@ func (s *Server) Serve(listener net.Listener) error {
 }
 
 func (s *Server) handle(c net.Conn) {
+	var readTimeout time.Duration
+
+	if s.ReadTimeout > 0 {
+		readTimeout = s.ReadTimeout
+	} else if s.Timeout > 0 {
+		readTimeout = s.Timeout
+	}
+
+	var writeTimeout time.Duration
+
+	if s.WriteTimeout > 0 {
+		writeTimeout = s.WriteTimeout
+	} else if s.Timeout > 0 {
+		writeTimeout = s.Timeout
+	}
+
 	conn := tls.Server(c, &tls.Config{
 		Certificates: []tls.Certificate{s.Cert},
 		ClientAuth:   tls.RequestClientCert,
@@ -193,10 +210,25 @@ func (s *Server) handle(c net.Conn) {
 		_ = conn.Close()
 	}()
 
-	s.setReadWriteDeadlines(conn)
+	var timeout time.Duration
 
-	if err := conn.Handshake(); err != nil {
-		return
+	if readTimeout > 0 && writeTimeout > 0 {
+		timeout = min(readTimeout, writeTimeout)
+	} else {
+		timeout = max(readTimeout, writeTimeout)
+	}
+
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		if err := conn.HandshakeContext(ctx); err != nil {
+			return
+		}
+	} else {
+		if err := conn.Handshake(); err != nil {
+			return
+		}
 	}
 
 	var cert *x509.Certificate
@@ -205,7 +237,13 @@ func (s *Server) handle(c net.Conn) {
 		cert = certs[0]
 	}
 
-	s.setReadWriteDeadlines(conn)
+	if readTimeout > 0 {
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
+	}
+
+	if writeTimeout > 0 {
+		conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	}
 
 	w := responseWriter{
 		w: conn,
@@ -312,20 +350,6 @@ func (s *Server) handle(c net.Conn) {
 	}
 
 	s.callHandler(&request, &w)
-}
-
-func (s *Server) setReadWriteDeadlines(conn net.Conn) {
-	if s.ReadTimeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(s.ReadTimeout))
-	} else if s.Timeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(s.Timeout))
-	}
-
-	if s.WriteTimeout > 0 {
-		conn.SetWriteDeadline(time.Now().Add(s.WriteTimeout))
-	} else if s.Timeout > 0 {
-		conn.SetWriteDeadline(time.Now().Add(s.Timeout))
-	}
 }
 
 func (s *Server) callHandler(r *Request, w ResponseWriter) {

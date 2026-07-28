@@ -1,4 +1,4 @@
-package gemini_test
+package gemini
 
 import (
 	"crypto/ecdsa"
@@ -15,13 +15,179 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/francescomari/gemini"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+func TestReadTimeoutTLS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+		defer cp.Close()
+
+		server := Server{
+			Cert:        newServerCertificate(t),
+			ReadTimeout: 10 * time.Second,
+		}
+
+		start := time.Now()
+		server.handle(sp)
+		require.Equal(t, server.ReadTimeout, time.Since(start))
+	})
+}
+
+func TestReadTimeoutOverTimeoutTLS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+		defer cp.Close()
+
+		server := Server{
+			Cert:        newServerCertificate(t),
+			ReadTimeout: 10 * time.Second,
+			Timeout:     20 * time.Second,
+		}
+
+		start := time.Now()
+		server.handle(sp)
+		require.Equal(t, server.ReadTimeout, time.Since(start))
+	})
+}
+
+func TestWriteTimeoutTLS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+		defer cp.Close()
+
+		server := Server{
+			Cert:         newServerCertificate(t),
+			WriteTimeout: 10 * time.Second,
+		}
+
+		start := time.Now()
+		server.handle(sp)
+		require.Equal(t, server.WriteTimeout, time.Since(start))
+	})
+}
+
+func TestWriteTimeoutOverTimeoutTLS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+		defer cp.Close()
+
+		server := Server{
+			Cert:         newServerCertificate(t),
+			WriteTimeout: 10 * time.Second,
+			Timeout:      20 * time.Second,
+		}
+
+		start := time.Now()
+		server.handle(sp)
+		require.Equal(t, server.WriteTimeout, time.Since(start))
+	})
+}
+
+func TestSmallerTimeoutTLS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+		defer cp.Close()
+
+		server := Server{
+			Cert:         newServerCertificate(t),
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 20 * time.Second,
+			Timeout:      30 * time.Second,
+		}
+
+		start := time.Now()
+		server.handle(sp)
+		require.Equal(t, server.ReadTimeout, time.Since(start))
+	})
+}
+
+func TestReadTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+
+		server := Server{
+			Cert:        newServerCertificate(t),
+			ReadTimeout: 10 * time.Second,
+		}
+
+		conn := tls.Client(cp, &tls.Config{InsecureSkipVerify: true})
+		defer conn.Close()
+
+		server.handle(sp)
+	})
+}
+
+func TestReadTimeoutOverTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+
+		server := Server{
+			Cert:        newServerCertificate(t),
+			ReadTimeout: 10 * time.Second,
+			Timeout:     20 * time.Second,
+		}
+
+		conn := tls.Client(cp, &tls.Config{InsecureSkipVerify: true})
+		defer conn.Close()
+
+		server.handle(sp)
+	})
+}
+
+func TestWriteTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+
+		server := Server{
+			Cert:         newServerCertificate(t),
+			WriteTimeout: 10 * time.Second,
+		}
+
+		conn := tls.Client(cp, &tls.Config{InsecureSkipVerify: true})
+		defer conn.Close()
+
+		go func() {
+			conn.Write([]byte("gemini://example.com\r\n"))
+		}()
+
+		server.handle(sp)
+	})
+}
+
+func TestWriteTimeoutOverTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sp, cp := net.Pipe()
+		defer sp.Close()
+
+		server := Server{
+			Cert:         newServerCertificate(t),
+			WriteTimeout: 10 * time.Second,
+			Timeout:      20 * time.Second,
+		}
+
+		conn := tls.Client(cp, &tls.Config{InsecureSkipVerify: true})
+		defer conn.Close()
+
+		go func() {
+			conn.Write([]byte("gemini://example.com\r\n"))
+		}()
+
+		server.handle(sp)
+	})
+}
 func TestServer(t *testing.T) {
 	cert := newServerCertificate(t)
 
@@ -59,7 +225,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("handler", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+		handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 			assert.Equal(t, "gemini", r.Scheme)
 			assert.Equal(t, "example.com", r.Host)
 			assert.Equal(t, 1234, r.Port)
@@ -74,7 +240,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("empty path is normalized", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+		handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 			assert.Equal(t, "/", r.Path)
 		})
 		addr := startServer(t, cert, handler)
@@ -82,7 +248,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("final slash is preserved", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+		handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 			assert.Equal(t, "/foo/", r.Path)
 		})
 		addr := startServer(t, cert, handler)
@@ -90,7 +256,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("client certificate", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+		handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 			assert.NotNil(t, r.Cert)
 			assert.Equal(t, "client", r.Cert.Subject.CommonName)
 		})
@@ -122,27 +288,27 @@ func TestServer(t *testing.T) {
 	t.Run("writer panic", func(t *testing.T) {
 		tests := []struct {
 			name       string
-			statusCode gemini.StatusCode
+			statusCode StatusCode
 			meta       string
 			value      string
 		}{
 			{"status code too low", 9, "", "invalid status code"},
 			{"status code too high", 70, "", "invalid status code"},
 			{"unspecified status code", 21, "", "invalid status code"},
-			{"control characters", gemini.StatusTemporaryFailure, "\n", "meta contains control characters"},
-			{"input without meta", gemini.StatusInputExpected, "", "sending an input without a prompt"},
-			{"sensitive input without meta", gemini.StatusSensitiveInput, "", "sending a sensitive input without a prompt"},
-			{"success without media type", gemini.StatusSuccess, "", "sending a success without a media type"},
-			{"invalid media type", gemini.StatusSuccess, "not a media type", "invalid media type"},
-			{"temporary redirection without uri", gemini.StatusTemporaryRedirection, "", "sending a temporary redirection without a URI"},
-			{"permanent redirection without uri", gemini.StatusPermanentRedirection, "", "sending a permanent redirection without a URI"},
-			{"temporary redirection with invalid uri", gemini.StatusTemporaryRedirection, ":", "invalid URI"},
-			{"permanent redirection with invalid uri", gemini.StatusPermanentRedirection, ":", "invalid URI"},
+			{"control characters", StatusTemporaryFailure, "\n", "meta contains control characters"},
+			{"input without meta", StatusInputExpected, "", "sending an input without a prompt"},
+			{"sensitive input without meta", StatusSensitiveInput, "", "sending a sensitive input without a prompt"},
+			{"success without media type", StatusSuccess, "", "sending a success without a media type"},
+			{"invalid media type", StatusSuccess, "not a media type", "invalid media type"},
+			{"temporary redirection without uri", StatusTemporaryRedirection, "", "sending a temporary redirection without a URI"},
+			{"permanent redirection without uri", StatusPermanentRedirection, "", "sending a permanent redirection without a URI"},
+			{"temporary redirection with invalid uri", StatusTemporaryRedirection, ":", "invalid URI"},
+			{"permanent redirection with invalid uri", StatusPermanentRedirection, ":", "invalid URI"},
 		}
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+				handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 					assert.PanicsWithValue(t, test.value, func() {
 						w.WriteHeader(test.statusCode, test.meta)
 					})
@@ -154,7 +320,7 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("panic", func(t *testing.T) {
-		handler := gemini.HandlerFunc(func(r *gemini.Request, w gemini.ResponseWriter) {
+		handler := HandlerFunc(func(r *Request, w ResponseWriter) {
 			panic("something went wrong")
 		})
 		addr := startServer(t, cert, handler)
@@ -163,8 +329,8 @@ func TestServer(t *testing.T) {
 	})
 }
 
-func handlerShouldNotBeCalled(t *testing.T) gemini.HandlerFunc {
-	return func(r *gemini.Request, w gemini.ResponseWriter) {
+func handlerShouldNotBeCalled(t *testing.T) HandlerFunc {
+	return func(r *Request, w ResponseWriter) {
 		assert.Fail(t, "the handler should not be called")
 	}
 }
@@ -276,7 +442,7 @@ func newSerialNumber(t *testing.T) *big.Int {
 	return serial
 }
 
-func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) string {
+func startServer(t *testing.T, cert tls.Certificate, handler Handler) string {
 	t.Helper()
 
 	var wg sync.WaitGroup
@@ -297,7 +463,7 @@ func startServer(t *testing.T, cert tls.Certificate, handler gemini.Handler) str
 	})
 
 	wg.Go(func() {
-		server := gemini.Server{
+		server := Server{
 			Cert:    cert,
 			Handler: handler,
 		}
