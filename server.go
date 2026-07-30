@@ -181,22 +181,6 @@ func (s *Server) Serve(listener net.Listener) error {
 }
 
 func (s *Server) handle(c net.Conn) {
-	var readTimeout time.Duration
-
-	if s.ReadTimeout > 0 {
-		readTimeout = s.ReadTimeout
-	} else if s.Timeout > 0 {
-		readTimeout = s.Timeout
-	}
-
-	var writeTimeout time.Duration
-
-	if s.WriteTimeout > 0 {
-		writeTimeout = s.WriteTimeout
-	} else if s.Timeout > 0 {
-		writeTimeout = s.Timeout
-	}
-
 	conn := tls.Server(c, &tls.Config{
 		Certificates: []tls.Certificate{s.Cert},
 		ClientAuth:   tls.RequestClientCert,
@@ -207,25 +191,11 @@ func (s *Server) handle(c net.Conn) {
 		_ = conn.Close()
 	}()
 
-	var timeout time.Duration
+	ctx, cancel := s.handshakeContext()
+	defer cancel()
 
-	if readTimeout > 0 && writeTimeout > 0 {
-		timeout = min(readTimeout, writeTimeout)
-	} else {
-		timeout = max(readTimeout, writeTimeout)
-	}
-
-	if timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		if err := conn.HandshakeContext(ctx); err != nil {
-			return
-		}
-	} else {
-		if err := conn.Handshake(); err != nil {
-			return
-		}
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return
 	}
 
 	var cert *x509.Certificate
@@ -234,12 +204,12 @@ func (s *Server) handle(c net.Conn) {
 		cert = certs[0]
 	}
 
-	if readTimeout > 0 {
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+	if t := s.readTimeout(); t > 0 {
+		conn.SetReadDeadline(time.Now().Add(t))
 	}
 
-	if writeTimeout > 0 {
-		conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	if t := s.writeTimeout(); t > 0 {
+		conn.SetWriteDeadline(time.Now().Add(t))
 	}
 
 	w := responseWriter{
@@ -347,6 +317,41 @@ func (s *Server) handle(c net.Conn) {
 	}
 
 	s.callHandler(&request, &w)
+}
+
+func (s *Server) readTimeout() time.Duration {
+	if s.ReadTimeout > 0 {
+		return s.ReadTimeout
+	}
+
+	return s.Timeout
+}
+
+func (s *Server) writeTimeout() time.Duration {
+	if s.WriteTimeout > 0 {
+		return s.WriteTimeout
+	}
+
+	return s.Timeout
+}
+
+func (s *Server) timeout() time.Duration {
+	r := s.readTimeout()
+	w := s.writeTimeout()
+
+	if r > 0 && w > 0 {
+		return min(r, w)
+	}
+
+	return max(r, w)
+}
+
+func (s *Server) handshakeContext() (context.Context, context.CancelFunc) {
+	if t := s.timeout(); t > 0 {
+		return context.WithTimeout(context.Background(), t)
+	}
+
+	return context.Background(), func() {}
 }
 
 func (s *Server) callHandler(r *Request, w ResponseWriter) {
