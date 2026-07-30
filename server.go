@@ -93,6 +93,8 @@ type Request struct {
 	// not-before, not-after, and signature of the provided certificate.
 	// Self-signed certificates are expected and encouraged.
 	Cert *x509.Certificate
+	// The client's remote address. Mostly for logging purposes.
+	RemoteAddr string
 }
 
 // ResponseWriter generates the server response. A ResponseWriter can't be
@@ -308,12 +310,13 @@ func (s *Server) handle(c net.Conn) {
 	port, _ := strconv.Atoi(parsed.Port())
 
 	request := Request{
-		Scheme: parsed.Scheme,
-		Host:   host,
-		Port:   port,
-		Path:   path,
-		Query:  parsed.RawQuery,
-		Cert:   cert,
+		Scheme:     parsed.Scheme,
+		Host:       host,
+		Port:       port,
+		Path:       path,
+		Query:      parsed.RawQuery,
+		Cert:       cert,
+		RemoteAddr: conn.RemoteAddr().String(),
 	}
 
 	s.callHandler(&request, &w)

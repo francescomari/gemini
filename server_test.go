@@ -230,6 +230,7 @@ func TestHandler(t *testing.T) {
 		assert.Equal(t, "/path", r.Path)
 		assert.Equal(t, "query", r.Query)
 		assert.Nil(t, r.Cert)
+		assert.NotEmpty(t, r.RemoteAddr)
 		w.Write([]byte("Some text\r\n"))
 	})
 	addr := startServer(t, handler)
