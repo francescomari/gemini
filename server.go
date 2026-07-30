@@ -20,9 +20,6 @@ import (
 	"unicode"
 )
 
-// DefaultPort is the default port used by the Gemini protocol.
-const DefaultPort = 1965
-
 // StatusCode is one of the available status codes.
 type StatusCode int
 
