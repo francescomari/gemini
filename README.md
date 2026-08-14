@@ -1,6 +1,6 @@
 # Gemini
 
-Yet another library for Gemini servers. See the [documentation](https://pkg.go.dev/github.com/francescomari/gemini)
+Yet another library for Gemini servers. See the [documentation](https://pkg.go.dev/github.com/francescomari/gemini) of this library, or read more about the [Gemini specifications](https://geminiprotocol.net/).
 
 ## Examples
 
