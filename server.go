@@ -126,16 +126,19 @@ type ResponseWriter interface {
 // While a handler should deal with its own panics, the server intercepts and
 // swallows a panic thrown by a handler. Unless a response has already been sent
 // to the client, a panic results in a StatusCGIError response.
+//
+// The context passed to a handler is an empty, background context with no
+// cancellation semantics defined by this library.
 type Handler interface {
-	Handle(r *Request, w ResponseWriter)
+	Handle(ctx context.Context, w ResponseWriter, r *Request)
 }
 
 // HandlerFunc is an implementation of Handler using a plain function.
-type HandlerFunc func(r *Request, w ResponseWriter)
+type HandlerFunc func(ctx context.Context, w ResponseWriter, r *Request)
 
 // Handle implements Handler.
-func (f HandlerFunc) Handle(r *Request, w ResponseWriter) {
-	f(r, w)
+func (f HandlerFunc) Handle(ctx context.Context, w ResponseWriter, r *Request) {
+	f(ctx, w, r)
 }
 
 // Server is a Gemini server. A Server can be safely used by multiple
@@ -319,7 +322,7 @@ func (s *Server) handle(c net.Conn) {
 		RemoteAddr: conn.RemoteAddr().String(),
 	}
 
-	s.callHandler(&request, &w)
+	s.callHandler(&w, &request)
 }
 
 func (s *Server) readTimeout() time.Duration {
@@ -357,14 +360,14 @@ func (s *Server) handshakeContext() (context.Context, context.CancelFunc) {
 	return context.Background(), func() {}
 }
 
-func (s *Server) callHandler(r *Request, w ResponseWriter) {
+func (s *Server) callHandler(w ResponseWriter, r *Request) {
 	defer func() {
 		if v := recover(); v != nil {
 			w.WriteHeader(StatusCGIError, "Panic")
 		}
 	}()
 
-	s.Handler.Handle(r, w)
+	s.Handler.Handle(context.Background(), w, r)
 }
 
 type responseWriter struct {

@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -223,7 +224,7 @@ func TestServerValidation(t *testing.T) {
 }
 
 func TestHandler(t *testing.T) {
-	handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+	handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 		assert.Equal(t, "gemini", r.Scheme)
 		assert.Equal(t, "example.com", r.Host)
 		assert.Equal(t, 1234, r.Port)
@@ -239,7 +240,7 @@ func TestHandler(t *testing.T) {
 }
 
 func TestEmptyPath(t *testing.T) {
-	handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+	handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 		assert.Equal(t, "/", r.Path)
 	})
 	addr := startServer(t, handler)
@@ -247,7 +248,7 @@ func TestEmptyPath(t *testing.T) {
 }
 
 func TestSlashSuffix(t *testing.T) {
-	handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+	handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 		assert.Equal(t, "/foo/", r.Path)
 	})
 	addr := startServer(t, handler)
@@ -255,7 +256,7 @@ func TestSlashSuffix(t *testing.T) {
 }
 
 func TestClientCertificate(t *testing.T) {
-	handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+	handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 		assert.NotNil(t, r.Cert)
 		assert.Equal(t, "client", r.Cert.Subject.CommonName)
 	})
@@ -307,7 +308,7 @@ func TestResponseWriterValidation(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+			handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 				assert.PanicsWithValue(t, test.value, func() {
 					w.WriteHeader(test.statusCode, test.meta)
 				})
@@ -319,7 +320,7 @@ func TestResponseWriterValidation(t *testing.T) {
 }
 
 func TestPanic(t *testing.T) {
-	handler := HandlerFunc(func(r *Request, w ResponseWriter) {
+	handler := HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {
 		panic("something went wrong")
 	})
 	addr := startServer(t, handler)
@@ -328,7 +329,7 @@ func TestPanic(t *testing.T) {
 }
 
 func handlerShouldNotBeCalled(t *testing.T) HandlerFunc {
-	return func(r *Request, w ResponseWriter) {
+	return func(ctx context.Context, w ResponseWriter, r *Request) {
 		assert.Fail(t, "the handler should not be called")
 	}
 }
