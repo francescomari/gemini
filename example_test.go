@@ -107,16 +107,15 @@ func ExampleMux() {
 		})
 	})
 
-	// The root (/) is called for requests to the root of this mux, but it also
-	// acts as a fallback when no other handler could be found. When registering a
-	// root handler, remember to check the request path.
+	// The root with a wildcard (/*) acts as a fallback when no other handler
+	// could be found.
 
 	m.On("/", gemini.HandlerFunc(func(ctx context.Context, w gemini.ResponseWriter, r *gemini.Request) {
-		if r.Path == "/" {
-			fmt.Fprint(w, "Index page\r\n")
-		} else {
-			w.WriteHeader(gemini.StatusNotFound, "")
-		}
+		fmt.Fprint(w, "Index page\r\n")
+	}))
+
+	m.On("/*", gemini.HandlerFunc(func(ctx context.Context, w gemini.ResponseWriter, r *gemini.Request) {
+		w.WriteHeader(gemini.StatusNotFound, "")
 	}))
 
 	// Use sub-muxes to group handlers sharing a common path prefix. Handlers can

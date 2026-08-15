@@ -47,17 +47,18 @@ type Mux struct {
 // placeholder using [Values].
 //
 // If the registered path ends with a slash (`/`), the handler is invoked for
-// the registered path itself and for every path that has it as a prefix, but
-// not for the same path without the trailing slash. For example, a handler
-// registered for `/foo/` is called for requests to `/foo/`, `/foo/bar`, and
-// `/foo/baz/`, but not for `/foo`. Registering a path on the root (`/`) acts
-// as a fallback for every request that couldn't be matched to a handler.
+// the registered path itself, but not for the same path without the trailing
+// slash. For example, a handler registered for `/foo/` is called for requests
+// to `/foo/`, but not for `/foo`.
 //
-// When multiple paths ending with a slash are registered, if a request could
-// not be matched exactly to a handler, the request is matched to the longest
-// matching, slash-terminated path. For example, assume that `/` and `/foo/` are
+// If a path ends with a wildcard (`*`) as its last component, the path matches
+// every path starting with that path prefix, up to the wildcard.  When multiple
+// paths ending with a wildcard are registered, if a request could not be
+// matched exactly to a handler, the request is matched to the longest matching,
+// wildcard-terminated path. For example, assume that `/*` and `/foo/*` are
 // registered. A request to `/foo/bar` is matched by the handler registered at
-// `/foo/`, but a request to `/bar` is matched by the handler registered at `/`.
+// `/foo/*`, but a request to `/bar` is matched by the handler registered at
+// `/*`.
 //
 // On panics if the mux is frozen, if the path is not absolute, if the handler
 // is nil, or if registering the path would result in an inconsistent
@@ -221,6 +222,7 @@ type node[T any] struct {
 	children         map[string]*node[T]
 	placeholder      string
 	placeholderChild *node[T]
+	slashChild       *node[T]
 	wildcardChild    *node[T]
 	hasValue         bool
 	value            T
@@ -230,18 +232,31 @@ func (n *node[T]) insert(path string, value T) {
 	if path == "/" {
 		n.value = value
 		n.hasValue = true
-
-		wildcard := new(node[T])
-		wildcard.value = value
-		wildcard.hasValue = true
-		n.wildcardChild = wildcard
-
 		return
 	}
 
 	curr := n
+	fail := ""
 
 	for c := range strings.SplitSeq(strings.Trim(path, "/"), "/") {
+		if fail != "" {
+			panic(fail)
+		}
+
+		if c == "*" {
+			if curr.placeholderChild != nil {
+				panic("wildcard must not overlap with placeholder")
+			}
+
+			next := new(node[T])
+			curr.wildcardChild = next
+			curr = next
+
+			fail = "wildcard must be the last path component"
+
+			continue
+		}
+
 		if strings.HasPrefix(c, "{") {
 			if !strings.HasSuffix(c, "}") {
 				panic("placeholders must be closed")
@@ -249,6 +264,10 @@ func (n *node[T]) insert(path string, value T) {
 
 			if len(c) < 3 {
 				panic("placeholders must have a name")
+			}
+
+			if curr.wildcardChild != nil {
+				panic("placeholder must not overlap with wildcard")
 			}
 
 			placeholder := c[1 : len(c)-1]
@@ -283,10 +302,14 @@ func (n *node[T]) insert(path string, value T) {
 		curr = next
 	}
 
-	if strings.HasSuffix(path, "/") {
-		wildcard := new(node[T])
-		curr.wildcardChild = wildcard
-		curr = wildcard
+	if path[len(path)-1] == '/' {
+		if path[len(path)-2] == '*' {
+			panic("wildcards can't be followed by a slash")
+		}
+
+		next := new(node[T])
+		curr.slashChild = next
+		curr = next
 	}
 
 	curr.value = value
@@ -301,14 +324,16 @@ func (n *node[T]) find(path string) (T, map[string]string) {
 	curr := n
 
 	var (
-		zero         T
-		wildcard     *node[T]
-		placeholders map[string]string
+		zero                 T
+		wildcard             *node[T]
+		wildcardPlaceholders map[string]string
+		placeholders         map[string]string
 	)
 
 	for c := range strings.SplitSeq(strings.Trim(path, "/"), "/") {
 		if curr.wildcardChild != nil {
 			wildcard = curr.wildcardChild
+			wildcardPlaceholders = maps.Clone(placeholders)
 		}
 
 		if curr.children != nil {
@@ -329,15 +354,15 @@ func (n *node[T]) find(path string) (T, map[string]string) {
 			continue
 		}
 
-		if wildcard != nil {
-			return wildcard.value, placeholders
+		if wildcard != nil && wildcard.hasValue {
+			return wildcard.value, wildcardPlaceholders
 		}
 
 		return zero, nil
 	}
 
 	if strings.HasSuffix(path, "/") {
-		curr = curr.wildcardChild
+		curr = curr.slashChild
 	}
 
 	if curr != nil && curr.hasValue {
@@ -345,7 +370,7 @@ func (n *node[T]) find(path string) (T, map[string]string) {
 	}
 
 	if wildcard != nil && wildcard.hasValue {
-		return wildcard.value, placeholders
+		return wildcard.value, wildcardPlaceholders
 	}
 
 	return zero, nil

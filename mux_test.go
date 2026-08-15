@@ -23,7 +23,7 @@ func TestNodeFind(t *testing.T) {
 	v, _ = n.find("/")
 	require.Equal(t, 1, v)
 	v, _ = n.find("/foo")
-	require.Equal(t, 1, v)
+	require.Equal(t, 0, v)
 
 	n.insert("/foo", 2)
 
@@ -32,18 +32,27 @@ func TestNodeFind(t *testing.T) {
 	v, _ = n.find("/foo")
 	require.Equal(t, 2, v)
 	v, _ = n.find("/bar")
-	require.Equal(t, 1, v)
+	require.Equal(t, 0, v)
 
 	n.insert("/bar/", 3)
 
 	v, _ = n.find("/bar")
-	require.Equal(t, 1, v)
+	require.Equal(t, 0, v)
 	v, _ = n.find("/bar/")
 	require.Equal(t, 3, v)
 	v, _ = n.find("/bar/baz")
-	require.Equal(t, 3, v)
+	require.Equal(t, 0, v)
 	v, _ = n.find("/bar/baz/")
-	require.Equal(t, 3, v)
+	require.Equal(t, 0, v)
+
+	n.insert("/baz/*", 4)
+
+	v, _ = n.find("/baz")
+	require.Equal(t, 0, v)
+	v, _ = n.find("/baz/")
+	require.Equal(t, 0, v)
+	v, _ = n.find("/baz/quz")
+	require.Equal(t, 4, v)
 }
 
 func TestNodePlaceholders(t *testing.T) {
@@ -66,12 +75,76 @@ func TestNodePlaceholders(t *testing.T) {
 	require.Equal(t, "1", p["uid"])
 
 	v, p = n.find("/users/1/posts")
-	require.Equal(t, 2, v)
-	require.Equal(t, "1", p["uid"])
+	require.Equal(t, 0, v)
 
 	v, p = n.find("/users/1/profile")
 	require.Equal(t, 3, v)
 	require.Equal(t, "1", p["uid"])
+
+	n.insert("/a/{a}/b/*", 4)
+	n.insert("/a/{a}/b/c/{c}/d", 5)
+
+	v, p = n.find("/a/1/b/c")
+	require.Equal(t, 4, v)
+	require.Contains(t, p, "a")
+	require.NotContains(t, p, "c")
+}
+
+func TestNodeRootWildcard(t *testing.T) {
+	var (
+		n node[int]
+		v int
+	)
+
+	n.insert("/", 1)
+
+	v, _ = n.find("/")
+	require.Equal(t, 1, v)
+	v, _ = n.find("/a")
+	require.Equal(t, 0, v)
+
+	n.insert("/*", 1)
+
+	v, _ = n.find("/")
+	require.Equal(t, 1, v)
+	v, _ = n.find("/a")
+	require.Equal(t, 1, v)
+}
+
+func TestWildcardSlashPanic(t *testing.T) {
+	var n node[int]
+
+	require.PanicsWithValue(t, "wildcards can't be followed by a slash", func() {
+		n.insert("/*/", 1)
+	})
+}
+
+func TestNoWildcardSuffixPanic(t *testing.T) {
+	var n node[int]
+
+	require.PanicsWithValue(t, "wildcard must be the last path component", func() {
+		n.insert("/foo/*/bar", 1)
+	})
+}
+
+func TestNodePlaceholderWildcardPanic(t *testing.T) {
+	var n node[int]
+
+	n.insert("/{x}", 1)
+
+	require.PanicsWithValue(t, "wildcard must not overlap with placeholder", func() {
+		n.insert("/*", 2)
+	})
+}
+
+func TestNodeWildcardPlaceholderPanic(t *testing.T) {
+	var n node[int]
+
+	n.insert("/*", 1)
+
+	require.PanicsWithValue(t, "placeholder must not overlap with wildcard", func() {
+		n.insert("/{x}", 2)
+	})
 }
 
 func TestNodePlaceholderNotClosed(t *testing.T) {
