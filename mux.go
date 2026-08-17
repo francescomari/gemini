@@ -46,15 +46,26 @@ type Mux struct {
 // component of the request path. The handler can retrieve the values of the
 // placeholder using [Values].
 //
+// When matching a request path component, a literal component takes precedence
+// over a placeholder, and a placeholder takes precedence over a wildcard. This
+// precedence applies component by component: if a literal or placeholder match
+// leads to a dead end further down the path, the mux backtracks and tries the
+// next alternative (placeholder, then wildcard) registered at that same
+// component instead of failing the whole match.
+//
 // If the registered path ends with a slash (`/`), the handler is invoked for
 // the registered path itself, but not for the same path without the trailing
 // slash. For example, a handler registered for `/foo/` is called for requests
 // to `/foo/`, but not for `/foo`.
 //
 // If a path ends with a wildcard (`*`) as its last component, the path matches
-// every path starting with that path prefix, up to the wildcard.  When multiple
-// paths ending with a wildcard are registered, if a request could not be
-// matched exactly to a handler, the request is matched to the longest matching,
+// any request path that starts with the prefix preceding the wildcard and has
+// at least one more path component after it. The prefix itself, with or without
+// a trailing slash, is not matched by the wildcard.  For example, a handler
+// registered for `/foo/*` is called for requests to `/foo/bar` and
+// `/foo/bar/baz`, but not for `/foo` or `/foo/`. When multiple paths ending
+// with a wildcard are registered, if a request could not be matched exactly to
+// a handler, the request is matched to the longest matching,
 // wildcard-terminated path. For example, assume that `/*` and `/foo/*` are
 // registered. A request to `/foo/bar` is matched by the handler registered at
 // `/foo/*`, but a request to `/bar` is matched by the handler registered at
