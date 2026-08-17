@@ -90,6 +90,24 @@ func TestNodePlaceholders(t *testing.T) {
 	require.NotContains(t, p, "c")
 }
 
+func TestNodePlaceholderBacktracking(t *testing.T) {
+	var n node[int]
+
+	n.insert("/users/{uid}", 1)
+	n.insert("/users/1/edit", 2)
+
+	v, p := n.find("/users/1")
+	require.Equal(t, 1, v)
+	require.Equal(t, "1", p["uid"])
+
+	v, p = n.find("/users/1/edit")
+	require.Equal(t, 2, v)
+
+	v, p = n.find("/users/2")
+	require.Equal(t, 1, v)
+	require.Equal(t, "2", p["uid"])
+}
+
 func TestNodeRootWildcard(t *testing.T) {
 	var (
 		n node[int]

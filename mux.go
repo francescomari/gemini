@@ -321,57 +321,73 @@ func (n *node[T]) find(path string) (T, map[string]string) {
 		return n.value, nil
 	}
 
-	curr := n
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	trailingSlash := strings.HasSuffix(path, "/")
 
-	var (
-		zero                 T
-		wildcard             *node[T]
-		wildcardPlaceholders map[string]string
-		placeholders         map[string]string
-	)
-
-	for c := range strings.SplitSeq(strings.Trim(path, "/"), "/") {
-		if curr.wildcardChild != nil {
-			wildcard = curr.wildcardChild
-			wildcardPlaceholders = maps.Clone(placeholders)
-		}
-
-		if curr.children != nil {
-			next := curr.children[c]
-
-			if next != nil {
-				curr = next
-				continue
-			}
-		}
-
-		if curr.placeholder != "" {
-			if placeholders == nil {
-				placeholders = make(map[string]string)
-			}
-			placeholders[curr.placeholder] = c
-			curr = curr.placeholderChild
-			continue
-		}
-
-		if wildcard != nil && wildcard.hasValue {
-			return wildcard.value, wildcardPlaceholders
-		}
-
+	value, placeholders, ok := n.match(segments, trailingSlash, nil, nil, nil)
+	if !ok {
+		var zero T
 		return zero, nil
 	}
 
-	if strings.HasSuffix(path, "/") {
-		curr = curr.slashChild
+	return value, placeholders
+}
+
+func (n *node[T]) match(segments []string, trailingSlash bool, placeholders map[string]string, wildcard *node[T], wildcardPlaceholders map[string]string) (T, map[string]string, bool) {
+	if len(segments) == 0 {
+		curr := n
+
+		if trailingSlash {
+			curr = n.slashChild
+		}
+
+		if curr != nil && curr.hasValue {
+			return curr.value, placeholders, true
+		}
+
+		if wildcard != nil && wildcard.hasValue {
+			return wildcard.value, wildcardPlaceholders, true
+		}
+
+		var zero T
+
+		return zero, nil, false
 	}
 
-	if curr != nil && curr.hasValue {
-		return curr.value, placeholders
+	if n.wildcardChild != nil {
+		wildcard = n.wildcardChild
+		wildcardPlaceholders = placeholders
+	}
+
+	c, rest := segments[0], segments[1:]
+
+	if n.children != nil {
+		if next := n.children[c]; next != nil {
+			if value, values, ok := next.match(rest, trailingSlash, placeholders, wildcard, wildcardPlaceholders); ok {
+				return value, values, true
+			}
+		}
+	}
+
+	if n.placeholder != "" {
+		next := maps.Clone(placeholders)
+
+		if next == nil {
+			next = make(map[string]string)
+		}
+
+		next[n.placeholder] = c
+
+		if value, values, ok := n.placeholderChild.match(rest, trailingSlash, next, wildcard, wildcardPlaceholders); ok {
+			return value, values, true
+		}
 	}
 
 	if wildcard != nil && wildcard.hasValue {
-		return wildcard.value, wildcardPlaceholders
+		return wildcard.value, wildcardPlaceholders, true
 	}
 
-	return zero, nil
+	var zero T
+
+	return zero, nil, false
 }
