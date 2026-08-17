@@ -109,8 +109,11 @@ func (m *Mux) Use(middleware Middleware) {
 //
 // Sub-muxes must not be used to serve requests. A sub-mux panics if it's asked
 // to serve a request.
+//
+// Sub panics if the mux is frozen, or if the path is not absolute.
 func (m *Mux) Sub(path string, configure func(m *Mux)) {
 	m.checkFrozen()
+	m.checkPath(path)
 	sub := m.newSubRouter(path)
 	configure(sub)
 }

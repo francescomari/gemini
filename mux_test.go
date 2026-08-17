@@ -273,6 +273,22 @@ func TestMuxRelativePath(t *testing.T) {
 	})
 }
 
+func TestSubEmptyPath(t *testing.T) {
+	var m Mux
+
+	require.PanicsWithValue(t, "path must not be empty", func() {
+		m.Sub("", func(m *Mux) {})
+	})
+}
+
+func TestSubRelativePath(t *testing.T) {
+	var m Mux
+
+	require.PanicsWithValue(t, "path must be absolute", func() {
+		m.Sub("relative/path", func(m *Mux) {})
+	})
+}
+
 func TestMuxNilHandler(t *testing.T) {
 	var m Mux
 
