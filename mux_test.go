@@ -185,14 +185,75 @@ func TestMultipleDifferentPlaceholders(t *testing.T) {
 	var n node[int]
 
 	n.insert("/{foo}", 1)
-	n.insert("/{foo}", 2)
 
 	v, p := n.find("/something")
-	require.Equal(t, 2, v)
+	require.Equal(t, 1, v)
 	require.Equal(t, map[string]string{"foo": "something"}, p)
 
 	require.PanicsWithValue(t, "placeholders in the same position must be equal", func() {
 		n.insert("/{bar}", 3)
+	})
+}
+
+func TestNodeDuplicateRootPath(t *testing.T) {
+	var n node[int]
+
+	n.insert("/", 1)
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		n.insert("/", 2)
+	})
+}
+
+func TestNodeDuplicatePath(t *testing.T) {
+	var n node[int]
+
+	n.insert("/foo", 1)
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		n.insert("/foo", 2)
+	})
+}
+
+func TestNodeDuplicateSlashPath(t *testing.T) {
+	var n node[int]
+
+	n.insert("/foo/", 1)
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		n.insert("/foo/", 2)
+	})
+}
+
+func TestNodeDuplicatePlaceholderPath(t *testing.T) {
+	var n node[int]
+
+	n.insert("/users/{uid}", 1)
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		n.insert("/users/{uid}", 2)
+	})
+}
+
+func TestMuxDuplicatePath(t *testing.T) {
+	var m Mux
+
+	m.On("/foo", HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {}))
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		m.On("/foo", HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {}))
+	})
+}
+
+func TestSubMuxDuplicatePath(t *testing.T) {
+	var m Mux
+
+	m.On("/foo/bar", HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {}))
+
+	require.PanicsWithValue(t, "path already registered", func() {
+		m.Sub("/foo", func(m *Mux) {
+			m.On("/bar", HandlerFunc(func(ctx context.Context, w ResponseWriter, r *Request) {}))
+		})
 	})
 }
 

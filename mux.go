@@ -72,8 +72,8 @@ type Mux struct {
 // `/*`.
 //
 // On panics if the mux is frozen, if the path is not absolute, if the handler
-// is nil, or if registering the path would result in an inconsistent
-// configuration for this mux.
+// is nil, if the path was already registered, or if registering the path
+// would otherwise result in an inconsistent configuration for this mux.
 func (m *Mux) On(path string, h Handler) {
 	m.checkFrozen()
 	m.checkPath(path)
@@ -241,6 +241,10 @@ type node[T any] struct {
 
 func (n *node[T]) insert(path string, value T) {
 	if path == "/" {
+		if n.hasValue {
+			panic("path already registered")
+		}
+
 		n.value = value
 		n.hasValue = true
 		return
@@ -318,9 +322,15 @@ func (n *node[T]) insert(path string, value T) {
 			panic("wildcards can't be followed by a slash")
 		}
 
-		next := new(node[T])
-		curr.slashChild = next
-		curr = next
+		if curr.slashChild == nil {
+			curr.slashChild = new(node[T])
+		}
+
+		curr = curr.slashChild
+	}
+
+	if curr.hasValue {
+		panic("path already registered")
 	}
 
 	curr.value = value
