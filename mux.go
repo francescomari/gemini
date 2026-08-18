@@ -46,12 +46,17 @@ type Mux struct {
 // component of the request path. The handler can retrieve the values of the
 // placeholder using [Values].
 //
-// When matching a request path component, a literal component takes precedence
-// over a placeholder, and a placeholder takes precedence over a wildcard. This
-// precedence applies component by component: if a literal or placeholder match
-// leads to a dead end further down the path, the mux backtracks and tries the
-// next alternative (placeholder, then wildcard) registered at that same
-// component instead of failing the whole match.
+// Matching a request path is a single linear pass over its components, with no
+// backtracking. At each component, a literal match takes precedence over a
+// placeholder, and a placeholder takes precedence over a wildcard, but this
+// choice is final: if it doesn't lead to a registered handler by the end of
+// the path, the request is not matched, even if a different choice at an
+// earlier component would have led to one. For example, if both
+// `/users/{uid}` and `/users/1/edit` are registered, a request to `/users/1`
+// is not matched, because the literal component `1` takes precedence over the
+// placeholder `{uid}` and does not itself lead to a registered handler. It's
+// the caller's responsibility to register paths that don't rely on
+// backtracking to be matched correctly.
 //
 // If the registered path ends with a slash (`/`), the handler is invoked for
 // the registered path itself, but not for the same path without the trailing
@@ -345,73 +350,57 @@ func (n *node[T]) find(path string) (T, map[string]string) {
 		return n.value, nil
 	}
 
-	segments := strings.Split(strings.Trim(path, "/"), "/")
-	trailingSlash := strings.HasSuffix(path, "/")
+	curr := n
 
-	value, placeholders, ok := n.match(segments, trailingSlash, nil, nil, nil)
-	if !ok {
-		var zero T
-		return zero, nil
-	}
+	var (
+		zero                 T
+		wildcard             *node[T]
+		wildcardPlaceholders map[string]string
+		placeholders         map[string]string
+	)
 
-	return value, placeholders
-}
-
-func (n *node[T]) match(segments []string, trailingSlash bool, placeholders map[string]string, wildcard *node[T], wildcardPlaceholders map[string]string) (T, map[string]string, bool) {
-	if len(segments) == 0 {
-		curr := n
-
-		if trailingSlash {
-			curr = n.slashChild
+	for c := range strings.SplitSeq(strings.Trim(path, "/"), "/") {
+		if curr.wildcardChild != nil {
+			wildcard = curr.wildcardChild
+			wildcardPlaceholders = maps.Clone(placeholders)
 		}
 
-		if curr != nil && curr.hasValue {
-			return curr.value, placeholders, true
+		if curr.children != nil {
+			next := curr.children[c]
+
+			if next != nil {
+				curr = next
+				continue
+			}
+		}
+
+		if curr.placeholder != "" {
+			if placeholders == nil {
+				placeholders = make(map[string]string)
+			}
+			placeholders[curr.placeholder] = c
+			curr = curr.placeholderChild
+			continue
 		}
 
 		if wildcard != nil && wildcard.hasValue {
-			return wildcard.value, wildcardPlaceholders, true
+			return wildcard.value, wildcardPlaceholders
 		}
 
-		var zero T
-
-		return zero, nil, false
+		return zero, nil
 	}
 
-	if n.wildcardChild != nil {
-		wildcard = n.wildcardChild
-		wildcardPlaceholders = placeholders
+	if strings.HasSuffix(path, "/") {
+		curr = curr.slashChild
 	}
 
-	c, rest := segments[0], segments[1:]
-
-	if n.children != nil {
-		if next := n.children[c]; next != nil {
-			if value, values, ok := next.match(rest, trailingSlash, placeholders, wildcard, wildcardPlaceholders); ok {
-				return value, values, true
-			}
-		}
-	}
-
-	if n.placeholder != "" {
-		next := maps.Clone(placeholders)
-
-		if next == nil {
-			next = make(map[string]string)
-		}
-
-		next[n.placeholder] = c
-
-		if value, values, ok := n.placeholderChild.match(rest, trailingSlash, next, wildcard, wildcardPlaceholders); ok {
-			return value, values, true
-		}
+	if curr != nil && curr.hasValue {
+		return curr.value, placeholders
 	}
 
 	if wildcard != nil && wildcard.hasValue {
-		return wildcard.value, wildcardPlaceholders, true
+		return wildcard.value, wildcardPlaceholders
 	}
 
-	var zero T
-
-	return zero, nil, false
+	return zero, nil
 }
